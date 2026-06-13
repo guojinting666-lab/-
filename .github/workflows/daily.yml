@@ -1,0 +1,236 @@
+name: 每日新闻推送
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub 使用 UTC 时间；00:00 UTC = 北京时间 08:00
+    - cron: "0 0 * * *"
+
+jobs:
+  send-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 生成每日新闻并推送企业微信
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          python - <<'PY'
+          import email.utils
+          import html
+          import json
+          import os
+          import re
+          import urllib.parse
+          import urllib.request
+          import xml.etree.ElementTree as ET
+          from datetime import datetime, timedelta, timezone
+
+          BEIJING = timezone(timedelta(hours=8))
+          WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
+
+          NEWS_APIS = [
+              "https://api.vvhan.com/api/60s?type=json",
+              "https://api.pearktrue.cn/api/60s/",
+              "https://api.03c3.cn/api/zb",
+              "https://api.2xb.cn/zaob",
+          ]
+
+          FALLBACK_RSS = [
+              ("央视新闻", "https://news.google.com/rss/search?" + urllib.parse.urlencode({
+                  "q": "央视新闻 OR 新华社 OR 中国新闻网",
+                  "hl": "zh-CN",
+                  "gl": "CN",
+                  "ceid": "CN:zh-Hans",
+              })),
+              ("综合新闻", "https://news.google.com/rss/search?" + urllib.parse.urlencode({
+                  "q": "中国 今日 新闻 国内 国际 财经 科技 社会",
+                  "hl": "zh-CN",
+                  "gl": "CN",
+                  "ceid": "CN:zh-Hans",
+              })),
+          ]
+
+          WEATHER_CODES = {
+              0: "晴", 1: "大部晴朗", 2: "局部多云", 3: "阴",
+              45: "雾", 48: "雾凇", 51: "小毛毛雨", 53: "毛毛雨",
+              55: "较强毛毛雨", 56: "冻毛毛雨", 57: "较强冻毛毛雨",
+              61: "小雨", 63: "中雨", 65: "大雨", 66: "冻雨",
+              67: "较强冻雨", 71: "小雪", 73: "中雪", 75: "大雪",
+              77: "雪粒", 80: "阵雨", 81: "较强阵雨", 82: "强阵雨",
+              85: "阵雪", 86: "强阵雪", 95: "雷阵雨", 96: "雷阵雨伴冰雹",
+              99: "强雷阵雨伴冰雹",
+          }
+
+          WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+          CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
+          CN_DAYS = ["", "一日", "二日", "三日", "四日", "五日", "六日", "七日", "八日", "九日", "十日",
+                     "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日",
+                     "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
+
+          def http_get(url, timeout=25):
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125 Safari/537.36",
+                      "Accept": "application/json,text/html,application/xml,text/xml,*/*",
+                      "Accept-Language": "zh-CN,zh;q=0.9",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  return resp.read().decode("utf-8", errors="replace")
+
+          def clean_text(text):
+              text = html.unescape(str(text or ""))
+              text = re.sub(r"<[^>]+>", "", text)
+              text = re.sub(r"^\s*\d+[、.．]\s*", "", text)
+              text = re.sub(r"\s+", " ", text).strip()
+              text = re.sub(r"微信搜[:：]?.*$", "", text).strip()
+              text = re.sub(r"每日微语报.*$", "", text).strip()
+              return text.strip("；;，,。 ")
+
+          def looks_like_news(text):
+              if not text or len(text) < 8 or len(text) > 120:
+                  return False
+              if not re.search(r"[\u4e00-\u9fff]", text):
+                  return False
+              bad = ["今日油价", "早安", "晚安", "每日一言", "历史上的今天", "微信搜", "广告", "扫码", "关注公众号"]
+              return not any(x in text for x in bad)
+
+          def extract_news_from_obj(obj):
+              found = []
+              def walk(value):
+                  if len(found) >= 30:
+                      return
+                  if isinstance(value, list):
+                      for item in value:
+                          walk(item)
+                  elif isinstance(value, dict):
+                      for key in ["news", "list", "data", "content", "result", "items"]:
+                          if key in value:
+                              walk(value[key])
+                      for key in ["title", "text", "content", "news"]:
+                          if key in value and isinstance(value[key], str):
+                              s = clean_text(value[key])
+                              if looks_like_news(s):
+                                  found.append(s)
+                  elif isinstance(value, str):
+                      for part in re.split(r"[\n\r]+", value):
+                          s = clean_text(part)
+                          if looks_like_news(s):
+                              found.append(s)
+              walk(obj)
+              return found
+
+          def fetch_api_news():
+              errors = []
+              for url in NEWS_APIS:
+                  try:
+                      raw = http_get(url)
+                      try:
+                          obj = json.loads(raw)
+                          news = extract_news_from_obj(obj)
+                      except Exception:
+                          news = [clean_text(x) for x in re.split(r"[\n\r]+", raw) if looks_like_news(clean_text(x))]
+                      news = dedupe(news)
+                      if len(news) >= 8:
+                          return news[:15], errors
+                  except Exception as exc:
+                      errors.append(f"{url}: {exc}")
+              return [], errors
+
+          def fetch_rss_news():
+              news = []
+              for name, url in FALLBACK_RSS:
+                  try:
+                      raw = http_get(url)
+                      root = ET.fromstring(raw)
+                      for item in root.findall(".//item")[:25]:
+                          title = clean_text(item.findtext("title"))
+                          title = re.sub(r"\s+-\s+[^-]+$", "", title).strip()
+                          if looks_like_news(title):
+                              news.append(title)
+                  except Exception:
+                      pass
+              return dedupe(news)[:15]
+
+          def dedupe(items):
+              out = []
+              seen = set()
+              for item in items:
+                  item = clean_text(item)
+                  key = re.sub(r"\W+", "", item.lower())[:80]
+                  if not item or key in seen:
+                      continue
+                  seen.add(key)
+                  out.append(item)
+              return out
+
+          def get_hangzhou_weather():
+              # Open-Meteo 免费接口，无需 API Key。杭州经纬度：30.2741, 120.1551。
+              url = (
+                  "https://api.open-meteo.com/v1/forecast?"
+                  "latitude=30.2741&longitude=120.1551"
+                  "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+                  "&current=temperature_2m,wind_speed_10m"
+                  "&timezone=Asia%2FShanghai"
+                  "&forecast_days=1"
+              )
+              try:
+                  obj = json.loads(http_get(url))
+                  daily = obj.get("daily", {})
+                  current = obj.get("current", {})
+                  code = int((daily.get("weather_code") or [3])[0])
+                  desc = WEATHER_CODES.get(code, "天气待查")
+                  tmax = round(float((daily.get("temperature_2m_max") or [0])[0]))
+                  tmin = round(float((daily.get("temperature_2m_min") or [0])[0]))
+                  pop = daily.get("precipitation_probability_max") or [None]
+                  wind = current.get("wind_speed_10m")
+                  extra = []
+                  if pop[0] is not None:
+                      extra.append(f"降水概率{int(pop[0])}%")
+                  if wind is not None:
+                      extra.append(f"风速{round(float(wind))}km/h")
+                  suffix = "，" + "，".join(extra) if extra else ""
+                  return f"杭州天气：{desc}，{tmin}℃～{tmax}℃{suffix}"
+              except Exception:
+                  return "杭州天气：暂时获取失败"
+
+          def format_date(now):
+              return f"📆{CN_MONTHS[now.month - 1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
+
+          def send_wecom(content):
+              if not WECOM_WEBHOOK:
+                  raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
+              payload = {"msgtype": "markdown", "markdown": {"content": content}}
+              data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+              req = urllib.request.Request(
+                  WECOM_WEBHOOK,
+                  data=data,
+                  headers={"Content-Type": "application/json; charset=utf-8"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  body = resp.read().decode("utf-8", errors="replace")
+              print(body)
+              parsed = json.loads(body)
+              if parsed.get("errcode") != 0:
+                  raise RuntimeError(f"企业微信返回失败：{body}")
+
+          now = datetime.now(BEIJING)
+          news, api_errors = fetch_api_news()
+          if len(news) < 8:
+              news = fetch_rss_news()
+
+          lines = ["每日新闻", format_date(now), get_hangzhou_weather(), ""]
+          if news:
+              for idx, item in enumerate(news[:15], 1):
+                  lines.append(f"{idx}、{item}；")
+                  lines.append("")
+          else:
+              lines.append("1、今日新闻暂时获取失败，请稍后查看；")
+
+          content = "\n".join(lines).strip()
+          print(content)
+          send_wecom(content)
+          PY
+
