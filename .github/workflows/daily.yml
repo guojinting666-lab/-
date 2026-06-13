@@ -468,6 +468,52 @@ jobs:
               print(ai_text)
               return normalize_titles(parse_ai_selection(ai_text), candidates)
 
+          def generate_fill_titles(now, existing_titles, need_count):
+              if need_count <= 0:
+                  return []
+              if not SILICONFLOW_API_KEY:
+                  return []
+              prompt = "\n".join([
+                  f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
+                  f"请补充 {need_count} 条中文每日新闻标题，适合年轻人早上阅读。",
+                  "要求：只输出 JSON 数组，数组里是中文字符串，不要编号，不要解释。",
+                  "内容要求：尽量基于最近24小时到3天内的公开热点；如果无法确认具体数字，不要写具体数字。",
+                  "类别要均衡：国内民生、国际、科技数码、文娱消费、城市生活。",
+                  "不要股票股价、财报、银行宣传、会议活动稿、标题党、软文、足球新闻。",
+                  "每条必须一眼看懂，包含主体、动作、结果。",
+                  "已有标题，不要重复：",
+                  "\n".join(f"- {x}" for x in existing_titles),
+              ])
+              payload = {
+                  "model": SILICONFLOW_MODEL,
+                  "messages": [
+                      {"role": "system", "content": "你只输出 JSON 数组，内容是干净的中文新闻标题。"},
+                      {"role": "user", "content": prompt},
+                  ],
+                  "temperature": 0.2,
+                  "max_tokens": 1200,
+              }
+              try:
+                  raw = post_json(
+                      SILICONFLOW_URL,
+                      payload,
+                      headers={"Content-Type": "application/json", "Authorization": f"Bearer {SILICONFLOW_API_KEY}"},
+                      timeout=100,
+                  )
+                  obj = json.loads(raw)
+                  text = obj["choices"][0]["message"]["content"].strip()
+                  data = json.loads(text)
+                  if isinstance(data, list):
+                      result = []
+                      for item in data:
+                          title = clean_title(item)
+                          if title and has_chinese(title) and not too_similar(title, existing_titles + result):
+                              result.append(title)
+                      return result[:need_count]
+              except Exception as e:
+                  print("AI补齐失败：", str(e)[:300])
+              return []
+
           def format_content(now, weather, titles):
               lines = ["每日新闻", date_line(now), weather]
               for i, title in enumerate(titles, 1):
@@ -491,7 +537,7 @@ jobs:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
           now = datetime.now(BEIJING)
-          print("脚本版本：v14")
+          print("脚本版本：v15")
           weather = hangzhou_weather()
           candidates = sort_candidates(fetch_hot(fetch_rss(now))["items"])
           print(f"候选新闻数量：{len(candidates)}")
@@ -508,13 +554,26 @@ jobs:
                   if len(titles) >= 15:
                       break
           if len(titles) < 15:
+              titles.extend(generate_fill_titles(now, titles, 15 - len(titles)))
+          if len(titles) < 15:
               titles.extend([
-                  "国内多地继续优化城市公共服务，交通、消费和文旅配套成为重点；",
-                  "国际市场关注G7峰会前后政策信号，能源、贸易和安全议题升温；",
-                  "科技公司继续推进AI应用落地，办公、手机和智能硬件成为竞争焦点；",
-                  "暑期文旅消费逐步升温，演出、电影和短途旅行需求继续释放；",
-                  "新能源汽车和智能驾驶产业链保持活跃，价格、保险和补能体验受关注；",
+                  "国内多地继续优化城市公共服务，交通、消费和文旅配套成为重点",
+                  "国际市场关注G7峰会前后政策信号，能源、贸易和安全议题升温",
+                  "科技公司继续推进AI应用落地，办公、手机和智能硬件成为竞争焦点",
+                  "暑期文旅消费逐步升温，演出、电影和短途旅行需求继续释放",
+                  "新能源汽车和智能驾驶产业链保持活跃，价格、保险和补能体验受关注",
+                  "多地文旅部门加密暑期活动供给，夜游、演出和城市漫步成为消费重点",
+                  "AI硬件和端侧模型持续更新，手机、电脑和可穿戴设备加速接入智能功能",
+                  "海外市场继续关注中东局势变化，航运、能源和出行安全风险上升",
+                  "国内平台优化即时零售和本地生活服务，配送、到店和会员权益继续升级",
+                  "电影和演出市场进入暑期档，年轻观众带动线下娱乐消费回暖",
+                  "多地加强高温、降雨和强对流天气预警，出行和户外活动需关注临近提醒",
+                  "高校毕业季带动租房、招聘和城市服务需求上升，多地推出就业配套措施",
+                  "主要科技企业继续加码机器人和智能驾驶，应用场景从展示走向商业落地",
+                  "跨境电商和海淘服务继续下沉，物流时效、售后和线下体验成为竞争重点",
+                  "城市商圈加快改造存量空间，餐饮、展览和运动体验成为引流重点",
               ][:15-len(titles)])
+          titles = titles[:15]
           content = format_content(now, weather, titles)
           print(content)
           send_wecom(content)
