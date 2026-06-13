@@ -35,22 +35,16 @@ jobs:
           WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
           CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
           CN_DAYS = ["", "一日", "二日", "三日", "四日", "五日", "六日", "七日", "八日", "九日", "十日", "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日", "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
+          WEATHER_CODES = {0: "晴", 1: "大部晴朗", 2: "局部多云", 3: "阴", 45: "雾", 48: "雾凇", 51: "小毛毛雨", 53: "毛毛雨", 55: "较强毛毛雨", 61: "小雨", 63: "中雨", 65: "大雨", 71: "小雪", 73: "中雪", 75: "大雪", 80: "阵雨", 81: "较强阵雨", 82: "强阵雨", 95: "雷阵雨"}
 
-          WEATHER_CODES = {
-              0: "晴", 1: "大部晴朗", 2: "局部多云", 3: "阴",
-              45: "雾", 48: "雾凇", 51: "小毛毛雨", 53: "毛毛雨", 55: "较强毛毛雨",
-              61: "小雨", 63: "中雨", 65: "大雨", 71: "小雪", 73: "中雪", 75: "大雪",
-              80: "阵雨", 81: "较强阵雨", 82: "强阵雨", 95: "雷阵雨",
+          QUERIES = {
+              "国内民生": ["中国 国内 民生 社会 教育 医疗 交通 新规 最新", "中国 城市 消费 生活 年轻人 最新"],
+              "国际": ["国际 新闻 美国 欧洲 日本 韩国 中东 俄乌 最新", "全球 外交 安全 经济 最新"],
+              "财经商业": ["财经 商业 公司 汽车 新能源 消费 股市 最新", "大公司 财报 产品 发布 市场 最新"],
+              "科技数码": ["科技 手机 芯片 AI 机器人 游戏 互联网 最新", "数码 新品 App 大模型 半导体 最新"],
+              "文娱生活": ["电影 音乐 演唱会 文娱 票房 旅游 最新", "剧集 综艺 文旅 消费 年轻人 最新"],
+              "杭州本地": ["杭州 本地 交通 天气 消费 民生 最新", "浙江 杭州 城市 服务 活动 最新"],
           }
-
-          RSS_QUERIES = [
-              "中国 国内 社会 民生 教育 医疗 交通 新规 最新",
-              "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 最新",
-              "财经 商业 公司 股市 汽车 新能源 消费 市场 发布",
-              "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线",
-              "电影 音乐 文娱 票房 演唱会 旅游 年轻人 消费 最新",
-              "杭州 本地 天气 交通 消费 民生 最新",
-          ]
 
           HOT_ENDPOINTS = [
               "https://api-hot.imsyy.top/baidu",
@@ -65,11 +59,7 @@ jobs:
               "https://api.vvhan.com/api/hotlist/all",
           ]
 
-          BAD_WORDS = [
-              "每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤",
-              "广告", "扫码", "关注公众号", "一文读懂", "为什么", "怎么回事",
-              "深度", "研报", "报告：", "报告称", "透视", "市场介绍", "年终报道",
-          ]
+          BAD_WORDS = ["每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤", "广告", "扫码", "关注公众号", "一文读懂", "为什么", "怎么回事", "深度", "研报", "报告：", "报告称", "透视", "市场介绍", "年终报道", "引热议", "冲上热搜"]
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
@@ -93,11 +83,11 @@ jobs:
           def clean_title(text):
               text = html.unescape(str(text or ""))
               text = re.sub(r"<[^>]+>", "", text)
-              text = re.sub(r"^\s*\d+[\.\)、\-\s]*", "", text)
+              text = re.sub(r"^\s*[A-Za-z0-9]+[\.\)、\-\s]*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
               text = re.sub(r"[_｜|].*?(新闻|资讯|官网|客户端).*$", "", text)
               text = re.sub(r"\s+", " ", text).strip()
-              return text.strip(" ；;，,。")
+              return text.strip(" ；;，,。\"'")
 
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
@@ -111,11 +101,11 @@ jobs:
               except Exception:
                   return None
 
-          def add_candidate(store, title, source, published=None):
+          def add_candidate(store, title, category, published=None):
               title = clean_title(title)
               if not title or not has_chinese(title):
                   return
-              if len(title) < 9 or len(title) > 120:
+              if len(title) < 10 or len(title) > 120:
                   return
               if any(word in title for word in BAD_WORDS):
                   return
@@ -125,32 +115,29 @@ jobs:
               store["_seen"].add(key)
               store["items"].append({
                   "title": title,
-                  "source": source,
+                  "category": category,
                   "time": published.strftime("%Y-%m-%d %H:%M") if published else "",
               })
 
           def rss_urls(query):
-              google = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
-                  "q": query + " when:7d", "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans",
-              })
-              bing = "https://www.bing.com/news/search?" + urllib.parse.urlencode({
-                  "q": query, "format": "rss", "setlang": "zh-CN", "cc": "cn",
-              })
+              google = "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q": query + " when:7d", "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"})
+              bing = "https://www.bing.com/news/search?" + urllib.parse.urlencode({"q": query, "format": "rss", "setlang": "zh-CN", "cc": "cn"})
               return [google, bing]
 
           def fetch_rss(now):
               store = {"_seen": set(), "items": []}
-              for query in RSS_QUERIES:
-                  for url in rss_urls(query):
-                      try:
-                          root = ET.fromstring(http_get(url))
-                          for item in root.findall(".//item")[:80]:
-                              pub = parse_pubdate(item.findtext("pubDate"))
-                              if pub and not (now - timedelta(days=10) <= pub <= now + timedelta(minutes=30)):
-                                  continue
-                              add_candidate(store, item.findtext("title"), "rss", pub)
-                      except Exception:
-                          pass
+              for category, queries in QUERIES.items():
+                  for query in queries:
+                      for url in rss_urls(query):
+                          try:
+                              root = ET.fromstring(http_get(url))
+                              for item in root.findall(".//item")[:50]:
+                                  pub = parse_pubdate(item.findtext("pubDate"))
+                                  if pub and not (now - timedelta(days=10) <= pub <= now + timedelta(minutes=30)):
+                                      continue
+                                  add_candidate(store, item.findtext("title"), category, pub)
+                          except Exception:
+                              pass
               return store
 
           def extract_titles(obj):
@@ -172,9 +159,8 @@ jobs:
               for url in HOT_ENDPOINTS:
                   try:
                       obj = json.loads(http_get(url))
-                      source = url.rsplit("/", 1)[-1]
                       for title in extract_titles(obj):
-                          add_candidate(store, title, source, None)
+                          add_candidate(store, title, "热点", None)
                   except Exception:
                       pass
               return store
@@ -203,64 +189,105 @@ jobs:
           def date_line(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
-          def generate_news(now, weather, candidates):
+          def build_candidate_text(candidates):
+              lines = []
+              for item in candidates[:220]:
+                  time_text = f" {item['time']}" if item["time"] else ""
+                  lines.append(f"- [{item['category']}] {item['title']}{time_text}")
+              return "\n".join(lines) or "候选新闻为空。请根据最近几天公开热点，谨慎生成新闻标题，不要写无法确认的具体数字。"
+
+          def parse_ai_titles(text):
+              text = text.strip()
+              try:
+                  data = json.loads(text)
+                  if isinstance(data, dict):
+                      data = data.get("items") or data.get("news") or data.get("titles") or []
+                  if isinstance(data, list):
+                      return [clean_title(x) for x in data if isinstance(x, str)]
+              except Exception:
+                  pass
+              titles = []
+              for line in text.splitlines():
+                  line = clean_title(line)
+                  line = re.sub(r"^(新闻|标题)[:：；;]?", "", line).strip()
+                  if line:
+                      titles.append(line)
+              return titles
+
+          def normalize_titles(titles, candidates):
+              cleaned = []
+              seen = set()
+              for title in titles:
+                  title = clean_title(title)
+                  title = re.sub(r"^(新闻|标题)[:：；;]?", "", title).strip()
+                  if not title or not has_chinese(title):
+                      continue
+                  if len(title) < 12 or len(title) > 90:
+                      continue
+                  if any(word in title for word in BAD_WORDS):
+                      continue
+                  key = re.sub(r"\W+", "", title.lower())[:60]
+                  if key in seen:
+                      continue
+                  seen.add(key)
+                  cleaned.append(title)
+              for item in candidates:
+                  if len(cleaned) >= 15:
+                      break
+                  title = clean_title(item["title"])
+                  key = re.sub(r"\W+", "", title.lower())[:60]
+                  if key not in seen and has_chinese(title) and not any(word in title for word in BAD_WORDS):
+                      seen.add(key)
+                      cleaned.append(title[:90])
+              return cleaned[:15]
+
+          def generate_titles(now, candidates):
               if not SILICONFLOW_API_KEY:
                   raise RuntimeError("缺少 GitHub Secret：SILICONFLOW_API_KEY")
-              candidate_text = "\n".join(
-                  f"- {item['title']}" + (f"（{item['time']}）" if item["time"] else "")
-                  for item in candidates[:180]
-              )
-              if not candidate_text.strip():
-                  candidate_text = "候选新闻为空。请根据最近几天公开热点，生成谨慎、常识化、不写具体数字细节的中文每日新闻。"
-
               prompt = "\n".join([
-                  "你是一个中文每日新闻编辑。请生成一份适合年轻人早上快速阅读的《每日新闻》。",
+                  "你是中文每日新闻编辑。请从候选新闻中筛选并改写 15 条，适合年轻人早上快速阅读。",
                   f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
-                  "严格输出下面格式，不要加任何解释：",
-                  "每日新闻",
-                  date_line(now),
-                  weather,
-                  "1、新闻；",
-                  "2、新闻；",
-                  "...",
-                  "15、新闻；",
-                  "",
-                  "要求：",
-                  "1. 必须正好 15 条。",
-                  "2. 类型雨露均沾：国内民生、国际、财经商业、科技数码、文娱生活、城市消费都要有；任何单一领域不要超过 4 条。",
+                  "只输出 JSON 数组，数组里正好 15 个中文字符串。不要输出日期、天气、编号、解释、Markdown。",
+                  "选择规则：",
+                  "1. 类别要均衡：国内民生、国际、财经商业、科技数码、文娱生活、城市消费都要覆盖；单一领域不超过 4 条。",
+                  "2. 每条一眼看懂，必须包含主体、动作、结果。",
                   "3. 不要足球新闻，除非它是当天全网级重大事件。",
-                  "4. 每条必须一眼看懂：写清楚主体、动作、结果，不要需要点进去才知道内容的标题。",
-                  "5. 不要为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜等低信息标题。",
-                  "6. 不要来源、链接、日期、评论数、括号里的媒体名。",
-                  "7. 尽量使用最近几天的新消息；候选里明显过时的标题不要选。",
-                  "8. 如果候选新闻不足，仍然要输出 15 条，但要避免编具体金额、人数、比分等无法确认的细节。",
-                  "",
+                  "4. 不要低信息标题：为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜。",
+                  "5. 不要来源、链接、日期、评论数、括号媒体名。",
+                  "6. 不要把开头写成“新闻；”。不要使用 A/B/C 或 E/F/G 编号。",
+                  "7. 尽量选最近几天的新消息，明显过时的不要选。",
                   "候选新闻：",
-                  candidate_text,
+                  build_candidate_text(candidates),
               ])
-
               payload = {
                   "model": SILICONFLOW_MODEL,
                   "messages": [
-                      {"role": "system", "content": "你是谨慎的中文新闻编辑，输出必须干净、中文、可直接推送。"},
+                      {"role": "system", "content": "你只输出 JSON 数组，正好 15 个中文新闻标题。"},
                       {"role": "user", "content": prompt},
                   ],
-                  "temperature": 0.25,
-                  "max_tokens": 2200,
+                  "temperature": 0.15,
+                  "max_tokens": 1800,
               }
               raw = post_json(
                   SILICONFLOW_URL,
                   payload,
-                  headers={
-                      "Content-Type": "application/json",
-                      "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
-                  },
+                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {SILICONFLOW_API_KEY}"},
                   timeout=100,
               )
               obj = json.loads(raw)
               if "choices" not in obj:
                   raise RuntimeError("硅基流动返回异常：" + raw[:1000])
-              return obj["choices"][0]["message"]["content"].strip()
+              ai_text = obj["choices"][0]["message"]["content"]
+              return normalize_titles(parse_ai_titles(ai_text), candidates)
+
+          def format_content(now, weather, titles):
+              lines = ["每日新闻", date_line(now), weather]
+              for i, title in enumerate(titles, 1):
+                  title = clean_title(title)
+                  if not title.endswith("；"):
+                      title += "；"
+                  lines.append(f"{i}、{title}")
+              return "\n".join(lines)
 
           def send_wecom(content):
               if not WECOM_WEBHOOK:
@@ -279,7 +306,10 @@ jobs:
           weather = hangzhou_weather()
           candidates = fetch_hot(fetch_rss(now))["items"]
           print(f"候选新闻数量：{len(candidates)}")
-          content = generate_news(now, weather, candidates)
+          titles = generate_titles(now, candidates)
+          if len(titles) < 15:
+              raise RuntimeError(f"有效新闻不足 15 条，实际 {len(titles)} 条")
+          content = format_content(now, weather, titles)
           print(content)
           send_wecom(content)
           PY
