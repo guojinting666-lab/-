@@ -60,6 +60,7 @@ jobs:
           ]
 
           BAD_WORDS = ["每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤", "广告", "扫码", "关注公众号", "一文读懂", "为什么", "怎么回事", "深度", "研报", "报告：", "报告称", "透视", "市场介绍", "年终报道", "引热议", "冲上热搜"]
+          VAGUE_WORDS = ["新趋势", "新动态", "新平台", "新视角", "新策略", "新风尚", "新突破", "新挑战", "反思", "布局", "专栏", "看世界", "战略自主", "中心地位", "宏观", "启示", "观察：", "评论：", "例行记者会"]
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
@@ -114,6 +115,7 @@ jobs:
                   return
               store["_seen"].add(key)
               store["items"].append({
+                  "id": len(store["items"]) + 1,
                   "title": title,
                   "category": category,
                   "time": published.strftime("%Y-%m-%d %H:%M") if published else "",
@@ -189,56 +191,97 @@ jobs:
           def date_line(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
+          def is_good_title(title):
+              title = clean_title(title)
+              if not title or not has_chinese(title):
+                  return False
+              if len(title) < 14 or len(title) > 90:
+                  return False
+              if any(word in title for word in BAD_WORDS + VAGUE_WORDS):
+                  return False
+              if re.match(r"^(新闻|标题|安全|外交|国际|财经|科技|文娱|生活)[:：；;]", title):
+                  return False
+              if "？" in title or "?" in title:
+                  return False
+              concrete = bool(re.search(r"[A-Za-z0-9一二三四五六七八九十百千万亿%％℃]|宣布|发布|上线|下调|上调|开通|关闭|启动|恢复|暂停|批准|通过|签署|起诉|调查|召回|涨|跌|增长|下降|夺冠|上映|定档", title))
+              return concrete
+
           def build_candidate_text(candidates):
               lines = []
               for item in candidates[:220]:
                   time_text = f" {item['time']}" if item["time"] else ""
-                  lines.append(f"- [{item['category']}] {item['title']}{time_text}")
+                  lines.append(f"{item['id']}. [{item['category']}] {item['title']}{time_text}")
               return "\n".join(lines) or "候选新闻为空。请根据最近几天公开热点，谨慎生成新闻标题，不要写无法确认的具体数字。"
 
-          def parse_ai_titles(text):
+          def parse_ai_selection(text):
               text = text.strip()
               try:
                   data = json.loads(text)
                   if isinstance(data, dict):
                       data = data.get("items") or data.get("news") or data.get("titles") or []
                   if isinstance(data, list):
-                      return [clean_title(x) for x in data if isinstance(x, str)]
+                      return data
               except Exception:
                   pass
-              titles = []
+              selected = []
               for line in text.splitlines():
-                  line = clean_title(line)
-                  line = re.sub(r"^(新闻|标题)[:：；;]?", "", line).strip()
-                  if line:
-                      titles.append(line)
-              return titles
+                  m = re.search(r"\d+", line)
+                  if m:
+                      selected.append({"id": int(m.group(0)), "title": clean_title(line)})
+              return selected
 
-          def normalize_titles(titles, candidates):
+          def normalize_titles(selection, candidates):
+              by_id = {item["id"]: item for item in candidates}
               cleaned = []
               seen = set()
-              for title in titles:
+              category_count = {}
+
+              def add(title, category):
                   title = clean_title(title)
                   title = re.sub(r"^(新闻|标题)[:：；;]?", "", title).strip()
-                  if not title or not has_chinese(title):
-                      continue
-                  if len(title) < 12 or len(title) > 90:
-                      continue
-                  if any(word in title for word in BAD_WORDS):
-                      continue
+                  if not is_good_title(title):
+                      return False
+                  if category_count.get(category, 0) >= 4:
+                      return False
                   key = re.sub(r"\W+", "", title.lower())[:60]
                   if key in seen:
-                      continue
+                      return False
                   seen.add(key)
+                  category_count[category] = category_count.get(category, 0) + 1
                   cleaned.append(title)
+                  return True
+
+              for entry in selection:
+                  if isinstance(entry, dict):
+                      try:
+                          item_id = int(entry.get("id") or 0)
+                      except Exception:
+                          item_id = 0
+                      item = by_id.get(item_id)
+                      if not item:
+                          continue
+                      proposed = clean_title(entry.get("title") or item["title"])
+                      title = proposed if is_good_title(proposed) else item["title"]
+                      add(title, item["category"])
+                  elif isinstance(entry, int):
+                      item = by_id.get(entry)
+                      if item:
+                          add(item["title"], item["category"])
+
+              priority = ["国内民生", "国际", "财经商业", "科技数码", "文娱生活", "杭州本地", "热点"]
+              for category in priority:
+                  if len(cleaned) >= 15:
+                      break
+                  for item in candidates:
+                      if len(cleaned) >= 15:
+                          break
+                      if item["category"] == category:
+                          add(item["title"], item["category"])
+
               for item in candidates:
                   if len(cleaned) >= 15:
                       break
-                  title = clean_title(item["title"])
-                  key = re.sub(r"\W+", "", title.lower())[:60]
-                  if key not in seen and has_chinese(title) and not any(word in title for word in BAD_WORDS):
-                      seen.add(key)
-                      cleaned.append(title[:90])
+                  add(item["title"], item["category"])
               return cleaned[:15]
 
           def generate_titles(now, candidates):
@@ -247,22 +290,23 @@ jobs:
               prompt = "\n".join([
                   "你是中文每日新闻编辑。请从候选新闻中筛选并改写 15 条，适合年轻人早上快速阅读。",
                   f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
-                  "只输出 JSON 数组，数组里正好 15 个中文字符串。不要输出日期、天气、编号、解释、Markdown。",
+                  "只输出 JSON 数组，数组里正好 15 个对象。每个对象格式为 {\"id\": 候选编号, \"title\": \"改写后的中文标题\"}。不要输出日期、天气、编号、解释、Markdown。",
                   "选择规则：",
                   "1. 类别要均衡：国内民生、国际、财经商业、科技数码、文娱生活、城市消费都要覆盖；单一领域不超过 4 条。",
-                  "2. 每条一眼看懂，必须包含主体、动作、结果。",
+                  "2. 每条一眼看懂，必须包含具体主体、动作、结果。禁止写栏目式、评论式、趋势式空标题。",
                   "3. 不要足球新闻，除非它是当天全网级重大事件。",
                   "4. 不要低信息标题：为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜。",
                   "5. 不要来源、链接、日期、评论数、括号媒体名。",
                   "6. 不要把开头写成“新闻；”。不要使用 A/B/C 或 E/F/G 编号。",
-                  "7. 尽量选最近几天的新消息，明显过时的不要选。",
+                  "7. 必须选择候选新闻里的真实编号，不允许凭空编新闻。尽量选最近几天的新消息，明显过时的不要选。",
+                  "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足，就不要选。",
                   "候选新闻：",
                   build_candidate_text(candidates),
               ])
               payload = {
                   "model": SILICONFLOW_MODEL,
                   "messages": [
-                      {"role": "system", "content": "你只输出 JSON 数组，正好 15 个中文新闻标题。"},
+                      {"role": "system", "content": "你只输出 JSON 数组，正好 15 个对象，每个对象必须引用候选新闻 id。"},
                       {"role": "user", "content": prompt},
                   ],
                   "temperature": 0.15,
@@ -278,7 +322,7 @@ jobs:
               if "choices" not in obj:
                   raise RuntimeError("硅基流动返回异常：" + raw[:1000])
               ai_text = obj["choices"][0]["message"]["content"]
-              return normalize_titles(parse_ai_titles(ai_text), candidates)
+              return normalize_titles(parse_ai_selection(ai_text), candidates)
 
           def format_content(now, weather, titles):
               lines = ["每日新闻", date_line(now), weather]
