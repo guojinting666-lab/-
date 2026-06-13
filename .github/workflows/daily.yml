@@ -13,7 +13,9 @@ jobs:
       - name: 生成每日新闻并推送企业微信
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          # 如果这个模型不可用，到 GitHub Variables 里加 SILICONFLOW_MODEL 覆盖它。
+          SILICONFLOW_MODEL: ${{ vars.SILICONFLOW_MODEL || 'Qwen/Qwen2.5-7B-Instruct' }}
         run: |
           python - <<'PY'
           import email.utils
@@ -28,15 +30,11 @@ jobs:
 
           BEIJING = timezone(timedelta(hours=8))
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
-          GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-          GEMINI_MODEL = "gemini-1.5-flash"
-          GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+          SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY")
+          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL") or "Qwen/Qwen2.5-7B-Instruct"
+          SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
-          WEATHER_CODES = {
-              0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",51:"小毛毛雨",53:"毛毛雨",
-              55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",
-              75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"
-          }
+          WEATHER_CODES = {0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",51:"小毛毛雨",53:"毛毛雨",55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"}
           WEEKDAYS = ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"]
           CN_MONTHS = ["一月","二月","三月","四月","五月","六月","七月","八月","九月","十月","十一月","十二月"]
           CN_DAYS = ["","一日","二日","三日","四日","五日","六日","七日","八日","九日","十日","十一日","十二日","十三日","十四日","十五日","十六日","十七日","十八日","十九日","二十日","二十一日","二十二日","二十三日","二十四日","二十五日","二十六日","二十七日","二十八日","二十九日","三十日","三十一日"]
@@ -62,28 +60,16 @@ jobs:
               "https://api-hot.imsyy.top/douyin",
           ]
 
-          BAD_SOURCE_WORDS = [
-              "每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤",
-              "广告", "扫码", "关注公众号",
-          ]
+          BAD_SOURCE_WORDS = ["每日一言","历史上的今天","今日油价","彩票","星座","养生","鸡汤","广告","扫码","关注公众号"]
 
           def http_get(url, timeout=25):
-              req = urllib.request.Request(url, headers={
-                  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125 Safari/537.36",
-                  "Accept":"application/json,application/xml,text/xml,text/html,*/*",
-                  "Accept-Language":"zh-CN,zh;q=0.9",
-              })
+              req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125 Safari/537.36","Accept":"application/json,application/xml,text/xml,text/html,*/*","Accept-Language":"zh-CN,zh;q=0.9"})
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
-          def http_post_json(url, payload, headers=None, timeout=60):
+          def http_post_json(url, payload, headers=None, timeout=80):
               data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-              req = urllib.request.Request(
-                  url,
-                  data=data,
-                  headers=headers or {"Content-Type":"application/json; charset=utf-8"},
-                  method="POST",
-              )
+              req = urllib.request.Request(url, data=data, headers=headers or {"Content-Type":"application/json; charset=utf-8"}, method="POST")
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
@@ -112,34 +98,36 @@ jobs:
               params = {"q": query + " when:7d", "hl":"zh-CN", "gl":"CN", "ceid":"CN:zh-Hans"}
               return "https://news.google.com/rss/search?" + urllib.parse.urlencode(params)
 
-          def add_candidate(candidates, title, source, published=None):
+          def add_candidate(store, title, source, published=None):
               title = clean_text(title)
               if not title or not has_chinese(title) or len(title) < 8 or len(title) > 140:
                   return
               if any(w in title for w in BAD_SOURCE_WORDS):
                   return
               key = re.sub(r"\W+", "", title.lower())[:90]
-              if key in candidates["_seen"]:
+              if key in store["_seen"]:
                   return
-              candidates["_seen"].add(key)
-              date = published.strftime("%Y-%m-%d %H:%M") if published else ""
-              candidates["items"].append({"title": title, "source": source, "time": date})
+              store["_seen"].add(key)
+              store["items"].append({
+                  "title": title,
+                  "source": source,
+                  "time": published.strftime("%Y-%m-%d %H:%M") if published else ""
+              })
 
           def fetch_rss_candidates(now):
-              candidates = {"_seen": set(), "items": []}
+              store = {"_seen": set(), "items": []}
               for query in RSS_QUERIES:
                   try:
                       raw = http_get(rss_url(query))
                       root = ET.fromstring(raw)
-                      for item in root.findall(".//item")[:50]:
-                          title = item.findtext("title")
+                      for item in root.findall(".//item")[:60]:
                           pub = parse_pubdate(item.findtext("pubDate"))
                           if pub and not (now - timedelta(days=7) <= pub <= now + timedelta(minutes=10)):
                               continue
-                          add_candidate(candidates, title, "Google News", pub)
+                          add_candidate(store, item.findtext("title"), "Google News", pub)
                   except Exception:
                       continue
-              return candidates
+              return store
 
           def extract_titles(value):
               titles = []
@@ -156,16 +144,16 @@ jobs:
               walk(value)
               return titles
 
-          def fetch_hot_candidates(base):
+          def fetch_hot_candidates(store):
               for url in HOT_ENDPOINTS:
                   try:
                       obj = json.loads(http_get(url))
                       source = url.rsplit("/", 1)[-1]
                       for title in extract_titles(obj):
-                          add_candidate(base, title, source, None)
+                          add_candidate(store, title, source, None)
                   except Exception:
                       continue
-              return base
+              return store
 
           def get_hangzhou_weather():
               url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&current=wind_speed_10m&timezone=Asia%2FShanghai&forecast_days=1"
@@ -184,15 +172,12 @@ jobs:
           def format_date(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
-          def generate_with_gemini(now, weather, candidates):
-              if not GEMINI_API_KEY:
-                  raise RuntimeError("缺少 GitHub Secret：GEMINI_API_KEY")
-              candidate_text = "\n".join(
-                  f"- {x['title']}（来源:{x['source']}{'，时间:'+x['time'] if x['time'] else ''}）"
-                  for x in candidates[:120]
-              )
+          def generate_with_siliconflow(now, weather, candidates):
+              if not SILICONFLOW_API_KEY:
+                  raise RuntimeError("缺少 GitHub Secret：SILICONFLOW_API_KEY")
+              candidate_text = "\n".join(f"- {x['title']}（来源:{x['source']}{'，时间:'+x['time'] if x['time'] else ''}）" for x in candidates[:140])
               prompt = f"""
-你是一个每日新闻编辑。请只从下面候选标题中筛选和改写，不要编造候选外的新事实。
+你是一个每日新闻编辑。请只从候选标题中筛选和改写，不要编造候选外的新事实。
 
 今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。
 输出格式必须严格如下：
@@ -207,11 +192,11 @@ jobs:
 
 筛选规则：
 1. 必须输出15条。
-2. 新闻类型雨露均沾：国内社会/民生、国际、财经商业、科技数码、文娱生活都要有，任何单一领域不能超过4条。
+2. 类型雨露均沾：国内社会/民生、国际、财经商业、科技数码、文娱生活都要有，任何单一领域不能超过4条。
 3. 适合年轻人早上快速阅读。
 4. 标题必须一眼看懂新闻内容，不要“为什么/怎么回事/一文读懂/背后原因/引热议/冲上热搜/报告/研报/透视/年终报道/市场介绍/宏大叙事”这类。
-5. 尽量选择最近几天的新消息；候选里有明确旧年份或明显过时内容的不要选。
-6. 不要足球新闻，除非候选中体育新闻非常重大；默认不选足球。
+5. 尽量选最近几天的新消息；候选里有明确旧年份或明显过时内容的不要选。
+6. 默认不要足球新闻。
 7. 每条只写一句，30到55个中文字符左右，保留关键主体、动作和结果。
 8. 不要来源、不要日期、不要解释、不要小标题。
 
@@ -219,24 +204,35 @@ jobs:
 {candidate_text}
 """.strip()
               payload = {
-                  "contents": [{"parts": [{"text": prompt}]}],
-                  "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1800},
+                  "model": SILICONFLOW_MODEL,
+                  "messages": [
+                      {"role": "system", "content": "你是严谨的中文每日新闻编辑，只筛选候选新闻，不编造。"},
+                      {"role": "user", "content": prompt},
+                  ],
+                  "temperature": 0.2,
+                  "max_tokens": 2000,
               }
-              url = GEMINI_URL + "?key=" + urllib.parse.quote(GEMINI_API_KEY)
-              raw = http_post_json(url, payload, headers={"Content-Type":"application/json"}, timeout=90)
+              raw = http_post_json(
+                  SILICONFLOW_URL,
+                  payload,
+                  headers={
+                      "Content-Type":"application/json",
+                      "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
+                  },
+                  timeout=100,
+              )
               obj = json.loads(raw)
               try:
-                  return obj["candidates"][0]["content"]["parts"][0]["text"].strip()
+                  return obj["choices"][0]["message"]["content"].strip()
               except Exception:
-                  raise RuntimeError("Gemini 返回内容无法解析：" + raw[:1000])
+                  raise RuntimeError("硅基流动返回内容无法解析：" + raw[:1000])
 
           def send_wecom(content):
               if not WECOM_WEBHOOK:
                   raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
-              payload = {"msgtype":"markdown","markdown":{"content":content}}
               raw = http_post_json(
                   WECOM_WEBHOOK,
-                  payload,
+                  {"msgtype":"markdown","markdown":{"content":content}},
                   headers={"Content-Type":"application/json; charset=utf-8"},
                   timeout=30,
               )
@@ -249,7 +245,7 @@ jobs:
           candidates = fetch_hot_candidates(fetch_rss_candidates(now))["items"]
           if len(candidates) < 20:
               raise RuntimeError("候选新闻过少，无法生成可靠日报")
-          content = generate_with_gemini(now, weather, candidates)
+          content = generate_with_siliconflow(now, weather, candidates)
           print(content)
           send_wecom(content)
           PY
