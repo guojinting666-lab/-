@@ -79,6 +79,9 @@ jobs:
               "蔗里藏着", "主题党日", "党支部", "使命共担", "初心共守", "外交遗产", "统计新知",
               "通识中国", "当代中国", "攀岩鞋先涨", "大战略牵引", "场景上新", "品区·周末侃",
               "私享会", "藏着潮玩", "下班不回家", "花钱找虐", "微度假", "点燃新“夜”态",
+              "新刊速递", "中国国际政治季刊", "CJIP", "创刊二十周年", "专刊", "国政学人",
+              "青春经济", "新蓝海", "服务焕新", "点亮美好生活", "杭州智库", "女子学校师生",
+              "美伊战争重塑", "地缘变迁", "油价联动",
           ]
           VAGUE_WORDS = [
               "新趋势", "新动态", "新平台", "新视角", "新策略", "新风尚", "新突破", "新挑战", "反思", "布局",
@@ -96,7 +99,7 @@ jobs:
               "杭州本地": 1,
               "热点": 1,
           }
-          SEARCH_EXCLUDES = " -股票 -股价 -财报 -证券 -银行 -征信 -投融界 -新浪 -习近平外交文选 -研讨会 -论坛 -活动周 -发布会 -主题党日 -第几 -多少 -为何 -私享会 -微度假"
+          SEARCH_EXCLUDES = " -股票 -股价 -财报 -证券 -银行 -征信 -投融界 -新浪 -习近平外交文选 -研讨会 -论坛 -活动周 -发布会 -主题党日 -第几 -多少 -为何 -私享会 -微度假 -新刊速递 -专刊 -智库 -新蓝海"
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
@@ -277,6 +280,20 @@ jobs:
                   if wind is not None:
                       extras.append(f"风速{round(float(wind))}km/h")
                   return f"杭州天气：{desc}，{low}℃～{high}℃" + ("，" + "，".join(extras) if extras else "")
+              except Exception:
+                  pass
+              try:
+                  obj = json.loads(http_get("https://wttr.in/Hangzhou?format=j1", timeout=20))
+                  today = obj.get("weather", [{}])[0]
+                  current = obj.get("current_condition", [{}])[0]
+                  low = today.get("mintempC")
+                  high = today.get("maxtempC")
+                  desc = (current.get("lang_zh") or [{}])[0].get("value") or current.get("weatherDesc", [{}])[0].get("value") or "天气待查"
+                  wind = current.get("windspeedKmph")
+                  parts = [f"{low}℃～{high}℃"] if low and high else []
+                  if wind:
+                      parts.append(f"风速{wind}km/h")
+                  return "杭州天气：" + desc + ("，" + "，".join(parts) if parts else "")
               except Exception:
                   return "杭州天气：暂时获取失败"
 
@@ -477,10 +494,10 @@ jobs:
                   f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
                   f"请补充 {need_count} 条中文每日新闻标题，适合年轻人早上阅读。",
                   "要求：只输出 JSON 数组，数组里是中文字符串，不要编号，不要解释。",
-                  "内容要求：尽量基于最近24小时到3天内的公开热点；如果无法确认具体数字，不要写具体数字。",
+                  "内容要求：尽量基于最近24小时到3天内的公开热点；如果无法确认具体数字，不要写具体数字；不要写泛泛趋势句。",
                   "类别要均衡：国内民生、国际、科技数码、文娱消费、城市生活。",
                   "不要股票股价、财报、银行宣传、会议活动稿、标题党、软文、足球新闻。",
-                  "每条必须一眼看懂，包含主体、动作、结果。",
+                  "每条必须一眼看懂，包含明确主体、动作、结果；不要写“继续推进、保持活跃、成为焦点、需求释放、风险上升”这类空话。",
                   "已有标题，不要重复：",
                   "\n".join(f"- {x}" for x in existing_titles),
               ])
@@ -514,6 +531,26 @@ jobs:
                   print("AI补齐失败：", str(e)[:300])
               return []
 
+          def fill_from_candidates_relaxed(existing_titles, candidates, need_count):
+              result = []
+              for item in candidates:
+                  if len(result) >= need_count:
+                      break
+                  title = clean_title(item["title"])
+                  if not title or not has_chinese(title):
+                      continue
+                  if len(title) < 12 or len(title) > 95:
+                      continue
+                  if any(word in title for word in BAD_WORDS):
+                      continue
+                  if too_similar(title, existing_titles + result):
+                      continue
+                  # Relaxed fallback allows some softer titles, but still rejects obvious junk.
+                  if re.search(r"(股票|股价|财报|银行|研报|论坛|研讨会|主题党日|专刊|速递|第几|多少|为何|藏着|出圈|私享会|微度假|点亮美好生活)", title):
+                      continue
+                  result.append(title)
+              return result[:need_count]
+
           def format_content(now, weather, titles):
               lines = ["每日新闻", date_line(now), weather]
               for i, title in enumerate(titles, 1):
@@ -537,7 +574,7 @@ jobs:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
           now = datetime.now(BEIJING)
-          print("脚本版本：v15")
+          print("脚本版本：v16")
           weather = hangzhou_weather()
           candidates = sort_candidates(fetch_hot(fetch_rss(now))["items"])
           print(f"候选新闻数量：{len(candidates)}")
@@ -554,25 +591,9 @@ jobs:
                   if len(titles) >= 15:
                       break
           if len(titles) < 15:
-              titles.extend(generate_fill_titles(now, titles, 15 - len(titles)))
+              titles.extend(fill_from_candidates_relaxed(titles, candidates, 15 - len(titles)))
           if len(titles) < 15:
-              titles.extend([
-                  "国内多地继续优化城市公共服务，交通、消费和文旅配套成为重点",
-                  "国际市场关注G7峰会前后政策信号，能源、贸易和安全议题升温",
-                  "科技公司继续推进AI应用落地，办公、手机和智能硬件成为竞争焦点",
-                  "暑期文旅消费逐步升温，演出、电影和短途旅行需求继续释放",
-                  "新能源汽车和智能驾驶产业链保持活跃，价格、保险和补能体验受关注",
-                  "多地文旅部门加密暑期活动供给，夜游、演出和城市漫步成为消费重点",
-                  "AI硬件和端侧模型持续更新，手机、电脑和可穿戴设备加速接入智能功能",
-                  "海外市场继续关注中东局势变化，航运、能源和出行安全风险上升",
-                  "国内平台优化即时零售和本地生活服务，配送、到店和会员权益继续升级",
-                  "电影和演出市场进入暑期档，年轻观众带动线下娱乐消费回暖",
-                  "多地加强高温、降雨和强对流天气预警，出行和户外活动需关注临近提醒",
-                  "高校毕业季带动租房、招聘和城市服务需求上升，多地推出就业配套措施",
-                  "主要科技企业继续加码机器人和智能驾驶，应用场景从展示走向商业落地",
-                  "跨境电商和海淘服务继续下沉，物流时效、售后和线下体验成为竞争重点",
-                  "城市商圈加快改造存量空间，餐饮、展览和运动体验成为引流重点",
-              ][:15-len(titles)])
+              titles.extend(generate_fill_titles(now, titles, 15 - len(titles)))
           titles = titles[:15]
           content = format_content(now, weather, titles)
           print(content)
