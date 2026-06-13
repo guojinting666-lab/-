@@ -369,7 +369,24 @@ jobs:
                           return f"昨日热点：{title}"
                   except Exception:
                       continue
-              return "昨日热点：今日暂未抓到足够干净的热点标题"
+              return None
+
+          def tomorrow_focus_item(now):
+              parts = [weather_air_item(1).replace("明天天气：", "明天天气：")]
+              tomorrow = now + timedelta(days=1)
+              if tomorrow.weekday() == 0:
+                  parts.append("明天是周一，注意恢复工作日节奏")
+              elif tomorrow.weekday() == 5:
+                  parts.append("明天是周六，适合提前安排出行或休息")
+              elif tomorrow.weekday() == 6:
+                  parts.append("明天是周日，适合把下周安排提前理一遍")
+              for name, day in HOLIDAYS_2026:
+                  d = datetime.strptime(day, "%Y-%m-%d").date()
+                  diff = (d - tomorrow.date()).days
+                  if 0 <= diff <= 7:
+                      parts.append(f"明天距离{name}还有{diff}天")
+                      break
+              return "明日看点：" + "；".join(parts)
 
           def translate_items(items):
               if not SILICONFLOW_API_KEY:
@@ -398,20 +415,22 @@ jobs:
                   history_item(now),
               ]
               football = football_items(now, 2)
+              hot = yesterday_hot_item()
               items.append("足球：" + "；".join(x.replace("足球：", "") for x in football))
               items.extend([
                   steam_item(),
                   tech_item(now),
-                  yesterday_hot_item(),
                   pick(INFO_GAPS, now, 7),
                   f"电影：今天推荐{movie[0]}，导演{movie[1]}；{movie[2]}",
                   f"好书：今天推荐{book[0]}，作者{book[1]}；{book[2]}",
                   f"摘抄：{quote[0]}——{quote[1]}",
-                  f"赏析：{quote[2]}",
                   f"科普：{pick(SCIENCE, now, 3)}",
                   f"英语：{english[0]} / {english[1]}",
                   f"生活：{pick(LIFE, now, 5)}",
+                  tomorrow_focus_item(now),
               ])
+              if hot:
+                  items.insert(6, hot)
               items = translate_items(items)
               lines = ["每日轻量晨报", date_line(now)]
               for i, item in enumerate(items[:15], 1):
@@ -426,7 +445,7 @@ jobs:
               if json.loads(raw).get("errcode") != 0:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
-          print("脚本版本：light-brief-v5-15items")
+          print("脚本版本：light-brief-v6")
           content = build_content()
           print(content)
           send_wecom(content)
