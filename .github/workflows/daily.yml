@@ -15,6 +15,7 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           python - <<'PY'
+          import email.utils
           import html
           import json
           import os
@@ -41,20 +42,23 @@ jobs:
                      "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日",
                      "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
 
+          # 15条分配：足球2条保底，其他类型雨露均沾。
           TOPICS = [
-              ("international", 3, "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 最新 发生 宣布"),
+              ("football", 2, "足球 世界杯 欧冠 英超 西甲 中超 国足 转会 比分 昨日 最新"),
+              ("international", 3, "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 最新 宣布"),
               ("china_society", 3, "中国 国内 社会 民生 教育 医疗 交通 新规 警方 法院 最新"),
-              ("business", 3, "财经 商业 公司 股市 汽车 新能源 消费 市场 宣布 发布"),
-              ("tech", 3, "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线 宣布"),
-              ("sports_ent", 3, "足球 体育 世界杯 欧冠 中超 国足 电影 音乐 票房 比赛"),
+              ("business", 2, "财经 商业 公司 股市 汽车 新能源 消费 市场 宣布 发布"),
+              ("tech", 2, "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线 宣布"),
+              ("culture_life", 3, "电影 音乐 文娱 票房 旅游 年轻人 消费 生活 教育 就业 最新"),
           ]
 
           CATEGORY_WORDS = {
+              "football": ["足球", "世界杯", "欧冠", "英超", "西甲", "意甲", "德甲", "中超", "国足", "转会", "进球", "比分", "击败", "战胜"],
               "international": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "总统", "政府", "制裁", "冲突", "停火", "访问"],
               "china_society": ["中国", "国内", "杭州", "北京", "上海", "广州", "教育", "高考", "医疗", "医保", "交通", "铁路", "天气", "消费", "新规", "警方", "法院"],
               "business": ["财经", "股市", "A股", "港股", "美元", "人民币", "房价", "楼市", "公司", "上市", "汽车", "新能源", "特斯拉", "比亚迪", "市场"],
               "tech": ["科技", "AI", "人工智能", "大模型", "芯片", "手机", "华为", "苹果", "小米", "英伟达", "机器人", "互联网", "游戏"],
-              "sports_ent": ["足球", "世界杯", "欧冠", "英超", "西甲", "中超", "国足", "转会", "电影", "票房", "音乐", "演唱会", "文娱"],
+              "culture_life": ["电影", "票房", "音乐", "演唱会", "文娱", "旅游", "消费", "年轻人", "就业", "教育", "游戏", "社交"],
           }
 
           HARD_BAD = [
@@ -84,7 +88,7 @@ jobs:
                   url,
                   headers={
                       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125 Safari/537.36",
-                      "Accept": "application/json,text/html,application/xml,text/xml,*/*",
+                      "Accept": "application/xml,text/xml,*/*",
                       "Accept-Language": "zh-CN,zh;q=0.9",
                   },
               )
@@ -100,8 +104,24 @@ jobs:
               text = re.sub(r"\s+", " ", text).strip()
               return text.strip("；;，,。 ")
 
+          def parse_pubdate(text):
+              if not text:
+                  return None
+              try:
+                  dt = email.utils.parsedate_to_datetime(text)
+                  if dt.tzinfo is None:
+                      dt = dt.replace(tzinfo=timezone.utc)
+                  return dt.astimezone(BEIJING)
+              except Exception:
+                  return None
+
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
+
+          def is_within_24h(pub_dt, now):
+              if pub_dt is None:
+                  return False
+              return now - timedelta(hours=24) <= pub_dt <= now + timedelta(minutes=10)
 
           def is_factual_title(text):
               if not text or len(text) < 14 or len(text) > 105 or not has_chinese(text):
@@ -117,7 +137,12 @@ jobs:
               return has_match_score or has_source_fact or (has_action and (has_number or "：" in text or ":" in text)) or (has_action and len(text) >= 20)
 
           def rss_url(query):
-              params = {"q": query, "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
+              params = {
+                  "q": query + " when:1d",
+                  "hl": "zh-CN",
+                  "gl": "CN",
+                  "ceid": "CN:zh-Hans",
+              }
               return "https://news.google.com/rss/search?" + urllib.parse.urlencode(params)
 
           def score_for_category(text, category):
@@ -131,25 +156,29 @@ jobs:
                   score += 5
               if re.search(r"\d+\s*[-:：比]\s*\d+", text):
                   score += 8
+              # 防止科技类被AI霸榜：AI只加一点点，不再大幅加权。
               if category == "tech" and any(x in text for x in ["AI", "人工智能", "OpenAI", "大模型"]):
                   score += 1
               return score
 
-          def fetch_category(category, query):
+          def fetch_category(category, query, now):
               out = []
               try:
                   raw = http_get(rss_url(query))
                   root = ET.fromstring(raw)
-                  for item in root.findall(".//item")[:45]:
+                  for item in root.findall(".//item")[:50]:
                       title = clean_text(item.findtext("title"))
+                      pub_dt = parse_pubdate(item.findtext("pubDate"))
+                      if not is_within_24h(pub_dt, now):
+                          continue
                       if is_factual_title(title):
                           score = score_for_category(title, category)
                           if score > 0:
-                              out.append((score, title))
+                              out.append((score, pub_dt, title))
               except Exception:
                   pass
-              out.sort(key=lambda x: x[0], reverse=True)
-              return [title for score, title in out]
+              out.sort(key=lambda x: (x[0], x[1] or datetime.min.replace(tzinfo=BEIJING)), reverse=True)
+              return [title for score, pub_dt, title in out]
 
           def dedupe(items):
               out = []
@@ -161,23 +190,33 @@ jobs:
                       out.append(item)
               return out
 
-          def get_news():
+          def get_news(now):
               picked = []
               pools = []
               for category, quota, query in TOPICS:
-                  pool = dedupe(fetch_category(category, query))
-                  pools.append((quota, pool))
+                  pool = dedupe(fetch_category(category, query, now))
+                  pools.append((category, quota, pool))
                   picked.extend(pool[:quota])
               picked = dedupe(picked)
-              if len(picked) < TARGET_TOTAL:
-                  for quota, pool in pools:
-                      for item in pool[quota:]:
-                          if item not in picked:
-                              picked.append(item)
-                          if len(picked) >= TARGET_TOTAL:
-                              break
+
+              # 如果某类不足，用其他类补足，但每类最多5条，避免单领域霸榜。
+              counts = {category: 0 for category, _, _ in TOPICS}
+              for category, quota, pool in pools:
+                  for title in pool[:quota]:
+                      if title in picked:
+                          counts[category] += 1
+              for category, quota, pool in pools:
+                  for item in pool[quota:]:
                       if len(picked) >= TARGET_TOTAL:
                           break
+                      if item in picked:
+                          continue
+                      if counts.get(category, 0) >= 5:
+                          continue
+                      picked.append(item)
+                      counts[category] = counts.get(category, 0) + 1
+                  if len(picked) >= TARGET_TOTAL:
+                      break
               return picked[:TARGET_TOTAL]
 
           def get_hangzhou_weather():
@@ -229,14 +268,14 @@ jobs:
                   raise RuntimeError(f"企业微信返回失败：{body}")
 
           now = datetime.now(BEIJING)
-          news = get_news()
+          news = get_news(now)
           lines = ["每日新闻", format_date(now), get_hangzhou_weather(), ""]
           if news:
               for idx, item in enumerate(news, 1):
                   lines.append(f"{idx}、{item}；")
                   lines.append("")
           else:
-              lines.append("1、今日新闻暂时获取失败，请稍后查看；")
+              lines.append("1、今日新闻暂时获取失败，可能是新闻源暂未返回过去24小时内的有效标题；")
           content = "\n".join(lines).strip()
           print(content)
           send_wecom(content)
