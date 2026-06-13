@@ -38,6 +38,23 @@ jobs:
           WEATHER_CODES = {0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",48:"雾凇",51:"小毛毛雨",53:"毛毛雨",55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"}
 
           HOLIDAYS_2026 = [("端午节", "2026-06-19"), ("中秋节", "2026-09-25"), ("国庆节", "2026-10-01")]
+          LUNAR_2026 = {
+              "2026-06-13": "农历四月廿八",
+              "2026-06-14": "农历四月廿九",
+              "2026-06-15": "农历五月初一",
+              "2026-06-16": "农历五月初二",
+              "2026-06-17": "农历五月初三",
+              "2026-06-18": "农历五月初四",
+              "2026-06-19": "农历五月初五，端午节",
+              "2026-06-20": "农历五月初六",
+          }
+          SOLAR_TERMS_2026 = [
+              ("芒种", "2026-06-05"),
+              ("夏至", "2026-06-21"),
+              ("小暑", "2026-07-07"),
+              ("大暑", "2026-07-23"),
+              ("立秋", "2026-08-07"),
+          ]
           FOOTBALL_LEAGUES = [("世界杯", "fifa.world"), ("欧冠", "uefa.champions"), ("英超", "eng.1"), ("西甲", "esp.1"), ("意甲", "ita.1"), ("德甲", "ger.1"), ("法甲", "fra.1"), ("中超", "chn.1")]
           TECH_RSS = [("OpenAI", "https://openai.com/blog/rss.xml"), ("Apple", "https://www.apple.com/newsroom/rss-feed.rss"), ("Google", "https://blog.google/rss/"), ("Microsoft", "https://blogs.microsoft.com/feed/"), ("GitHub", "https://github.blog/feed/")]
           TEAM_ZH = {"Bosnia-Herz":"波黑","Bosnia and Herzegovina":"波黑","Canada":"加拿大","Paraguay":"巴拉圭","USA":"美国","United States":"美国","Switzerland":"瑞士","Qatar":"卡塔尔","England":"英格兰","Spain":"西班牙","France":"法国","Germany":"德国","Italy":"意大利","Brazil":"巴西","Argentina":"阿根廷"}
@@ -91,12 +108,12 @@ jobs:
               "睡前半小时把手机亮度调低、消息静音，比强迫自己早睡更容易执行。",
               "喝咖啡尽量避开起床后立刻喝，上午中段通常更适合。"
           ]
-          QUESTIONS = [
-              "今日小问题：为什么高铁和飞机的窗户大多是圆角？",
-              "今日小问题：为什么刚下雨时路面反而更滑？",
-              "今日小问题：为什么同样温度下，湿冷会比干冷更难受？",
-              "今日小问题：为什么很多 App 喜欢用红点提醒？",
-              "今日小问题：为什么电梯里手机信号常常变差？",
+          INFO_GAPS = [
+              "今日信息差：很多“免费试用”真正要注意的是自动续费日期，开通后立刻设置取消提醒更稳。",
+              "今日信息差：买电子产品别只看首发价，首发后两到四周常会出现平台券和套装补贴。",
+              "今日信息差：外卖满减不一定便宜，先看实际支付价和配送费，比凑单更有用。",
+              "今日信息差：订酒店时同一家店在不同平台的取消规则可能不同，低价前先看退改条件。",
+              "今日信息差：App 权限里“后台刷新”和“精准定位”最容易默默耗电，用不到就关掉。",
           ]
 
           def pick(arr, now, offset=0):
@@ -130,6 +147,42 @@ jobs:
           def date_line(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
+          def uv_note(uv):
+              if uv is None:
+                  return ""
+              uv = float(uv)
+              if uv < 3:
+                  return "紫外线较弱"
+              if uv < 6:
+                  return "紫外线中等，长时间户外建议防晒"
+              if uv < 8:
+                  return "紫外线较强，建议防晒"
+              return "紫外线很强，尽量减少暴晒"
+
+          def aqi_note(aqi):
+              if aqi is None:
+                  return ""
+              aqi = float(aqi)
+              if aqi <= 50:
+                  return "空气好，适合户外"
+              if aqi <= 100:
+                  return "空气可接受"
+              if aqi <= 150:
+                  return "轻度污染，敏感人群少久待户外"
+              if aqi <= 200:
+                  return "中度污染，建议减少户外运动"
+              return "污染较重，尽量减少户外活动"
+
+          def pm25_note(pm25):
+              if pm25 is None:
+                  return ""
+              pm25 = float(pm25)
+              if pm25 <= 35:
+                  return "PM2.5较低"
+              if pm25 <= 75:
+                  return "PM2.5偏高，敏感人群注意"
+              return "PM2.5较高，建议减少户外暴露"
+
           def weather_air_item(day_offset=0):
               url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max&current=wind_speed_10m&timezone=Asia%2FShanghai&forecast_days=2"
               try:
@@ -149,23 +202,36 @@ jobs:
                   try:
                       aq = json.loads(http_get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=30.2741&longitude=120.1551&current=pm2_5,us_aqi&timezone=Asia%2FShanghai", timeout=15)).get("current", {})
                       if aq.get("us_aqi") is not None:
-                          air = f"，AQI {round(float(aq['us_aqi']))}"
+                          air = f"，AQI {round(float(aq['us_aqi']))}（{aqi_note(aq.get('us_aqi'))}）"
                       if aq.get("pm2_5") is not None:
-                          air += f"，PM2.5 {round(float(aq['pm2_5']), 1)}"
+                          air += f"，PM2.5 {round(float(aq['pm2_5']), 1)}（{pm25_note(aq.get('pm2_5'))}）"
                   except Exception:
                       pass
                   extra = []
                   if pop is not None:
                       extra.append(f"降水概率{int(pop)}%")
                   if uv is not None:
-                      extra.append(f"紫外线{round(float(uv), 1)}")
-                  return f"天气空气：杭州{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extra) if extra else "") + air
+                      extra.append(f"紫外线{round(float(uv), 1)}（{uv_note(uv)}）")
+                  tomorrow = weather_air_item(1)
+                  return f"天气空气：今天杭州{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extra) if extra else "") + air + f"；{tomorrow}"
               except Exception:
                   return "天气空气：杭州天气暂时获取失败"
 
           def calendar_item(now):
               today = now.date()
               bits = []
+              lunar = LUNAR_2026.get(today.strftime("%Y-%m-%d"))
+              if lunar:
+                  bits.append(lunar)
+              next_term = None
+              for name, day in SOLAR_TERMS_2026:
+                  d = datetime.strptime(day, "%Y-%m-%d").date()
+                  diff = (d - today).days
+                  if diff >= 0:
+                      next_term = f"距离{name}还有{diff}天" if diff else f"今天是{name}"
+                      break
+              if next_term:
+                  bits.append(next_term)
               for name, day in HOLIDAYS_2026:
                   d = datetime.strptime(day, "%Y-%m-%d").date()
                   diff = (d - today).days
@@ -181,10 +247,21 @@ jobs:
           def history_item(now):
               try:
                   obj = json.loads(http_get(f"https://zh.wikipedia.org/api/rest_v1/feed/onthisday/events/{now.month}/{now.day}", timeout=20))
+                  old_events = []
                   for ev in obj.get("events", []):
                       text = clean(ev.get("text"))
                       year = ev.get("year")
-                      if text and len(text) <= 80 and not any(x in text for x in ["出生", "逝世"]):
+                      if not text or len(text) > 90 or any(x in text for x in ["出生", "逝世"]):
+                          continue
+                      if isinstance(year, int) and year <= now.year - 50:
+                          old_events.append((year, text))
+                  if old_events:
+                      year, text = old_events[0]
+                      return f"历史：{year}年，{text}"
+                  for ev in obj.get("events", []):
+                      text = clean(ev.get("text"))
+                      year = ev.get("year")
+                      if text and len(text) <= 90 and not any(x in text for x in ["出生", "逝世"]):
                           return f"历史：{year}年，{text}"
               except Exception:
                   pass
@@ -262,6 +339,38 @@ jobs:
                   pass
               return "游戏：Steam 热销榜暂时获取失败"
 
+          def yesterday_hot_item():
+              urls = [
+                  "https://api-hot.imsyy.top/baidu",
+                  "https://api-hot.imsyy.top/toutiao",
+                  "https://api-hot.imsyy.top/weibo",
+                  "https://api-hot.imsyy.top/zhihu",
+              ]
+              bad = ["股票", "股价", "财报", "广告", "直播", "彩票", "星座", "美女", "网红", "八卦", "开播", "抽奖", "第几", "多少", "为何", "一文读懂"]
+              def walk(obj):
+                  if isinstance(obj, dict):
+                      for key in ["title", "name", "word", "desc", "hot_word", "keyword"]:
+                          if isinstance(obj.get(key), str):
+                              yield obj[key]
+                      for v in obj.values():
+                          yield from walk(v)
+                  elif isinstance(obj, list):
+                      for v in obj:
+                          yield from walk(v)
+              for url in urls:
+                  try:
+                      obj = json.loads(http_get(url, timeout=15))
+                      for raw in walk(obj):
+                          title = clean(raw)
+                          if len(title) < 8 or len(title) > 60:
+                              continue
+                          if any(x in title for x in bad):
+                              continue
+                          return f"昨日热点：{title}"
+                  except Exception:
+                      continue
+              return "昨日热点：今日暂未抓到足够干净的热点标题"
+
           def translate_items(items):
               if not SILICONFLOW_API_KEY:
                   return items
@@ -288,10 +397,13 @@ jobs:
                   calendar_item(now),
                   history_item(now),
               ]
-              items.extend(football_items(now, 2))
+              football = football_items(now, 2)
+              items.append("足球：" + "；".join(x.replace("足球：", "") for x in football))
               items.extend([
                   steam_item(),
                   tech_item(now),
+                  yesterday_hot_item(),
+                  pick(INFO_GAPS, now, 7),
                   f"电影：今天推荐{movie[0]}，导演{movie[1]}；{movie[2]}",
                   f"好书：今天推荐{book[0]}，作者{book[1]}；{book[2]}",
                   f"摘抄：{quote[0]}——{quote[1]}",
@@ -299,8 +411,6 @@ jobs:
                   f"科普：{pick(SCIENCE, now, 3)}",
                   f"英语：{english[0]} / {english[1]}",
                   f"生活：{pick(LIFE, now, 5)}",
-                  pick(QUESTIONS, now, 6),
-                  "明日看点：" + weather_air_item(1),
               ])
               items = translate_items(items)
               lines = ["每日轻量晨报", date_line(now)]
@@ -316,7 +426,7 @@ jobs:
               if json.loads(raw).get("errcode") != 0:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
-          print("脚本版本：light-brief-v4-15items")
+          print("脚本版本：light-brief-v5-15items")
           content = build_content()
           print(content)
           send_wecom(content)
