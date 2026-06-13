@@ -59,8 +59,27 @@ jobs:
               "https://api.vvhan.com/api/hotlist/all",
           ]
 
-          BAD_WORDS = ["每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤", "广告", "扫码", "关注公众号", "一文读懂", "为什么", "怎么回事", "深度", "研报", "报告：", "报告称", "透视", "市场介绍", "年终报道", "引热议", "冲上热搜"]
-          VAGUE_WORDS = ["新趋势", "新动态", "新平台", "新视角", "新策略", "新风尚", "新突破", "新挑战", "反思", "布局", "专栏", "看世界", "战略自主", "中心地位", "宏观", "启示", "观察：", "评论：", "例行记者会"]
+          BAD_WORDS = [
+              "每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤", "广告", "扫码", "关注公众号",
+              "一文读懂", "为什么", "怎么回事", "深度", "研报", "报告：", "报告称", "透视", "市场介绍", "年终报道",
+              "引热议", "冲上热搜", "摘要", "头版头条", "内容精华", "黄金赛道", "大牛股", "商业消费",
+              "年中调查", "大会在", "论坛", "专栏", "观察者网", "发布战略", "生态大会", "破局", "再启新篇",
+              "美好生活大调查", "全民情绪消费", "产业链应用链",
+          ]
+          VAGUE_WORDS = [
+              "新趋势", "新动态", "新平台", "新视角", "新策略", "新风尚", "新突破", "新挑战", "反思", "布局",
+              "专栏", "看世界", "战略自主", "中心地位", "宏观", "启示", "观察：", "评论：", "例行记者会",
+              "时代来了", "直面", "还有多远", "关要闯", "新篇", "聚势", "融汇未来",
+          ]
+          CATEGORY_QUOTA = {
+              "国内民生": 3,
+              "国际": 3,
+              "财经商业": 3,
+              "科技数码": 3,
+              "文娱生活": 2,
+              "杭州本地": 1,
+              "热点": 2,
+          }
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
@@ -83,7 +102,17 @@ jobs:
 
           def clean_title(text):
               text = html.unescape(str(text or ""))
+              stripped = text.strip()
+              if stripped.startswith("{") and stripped.endswith("}"):
+                  try:
+                      obj = json.loads(stripped)
+                      text = obj.get("title") or obj.get("name") or ""
+                  except Exception:
+                      m = re.search(r'"title"\s*:\s*"([^"]+)"', stripped)
+                      text = m.group(1) if m else stripped
               text = re.sub(r"<[^>]+>", "", text)
+              text = re.sub(r'^\{?\s*"?id"?\s*[:：]?\s*\d+\s*,?\s*"?title"?\s*[:：]?\s*', "", text)
+              text = re.sub(r'"\s*\}?$', "", text)
               text = re.sub(r"^\s*[A-Za-z0-9]+[\.\)、\-\s]*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
               text = re.sub(r"[_｜|].*?(新闻|资讯|官网|客户端).*$", "", text)
@@ -135,12 +164,30 @@ jobs:
                               root = ET.fromstring(http_get(url))
                               for item in root.findall(".//item")[:50]:
                                   pub = parse_pubdate(item.findtext("pubDate"))
-                                  if pub and not (now - timedelta(days=10) <= pub <= now + timedelta(minutes=30)):
+                                  if pub and not (now - timedelta(days=5) <= pub <= now + timedelta(minutes=30)):
                                       continue
                                   add_candidate(store, item.findtext("title"), category, pub)
                           except Exception:
                               pass
               return store
+
+          def candidate_score(item):
+              score = 0
+              title = item["title"]
+              if item["time"]:
+                  score += 30
+              if is_good_title(title):
+                  score += 20
+              if any(x in title for x in ["宣布", "发布", "上线", "通过", "签署", "启动", "下调", "上调", "增长", "下降", "开通", "暂停", "召回", "定档"]):
+                  score += 10
+              if re.search(r"\d|%|％|万|亿|℃", title):
+                  score += 8
+              if any(word in title for word in BAD_WORDS + VAGUE_WORDS):
+                  score -= 50
+              return score
+
+          def sort_candidates(candidates):
+              return sorted(candidates, key=candidate_score, reverse=True)
 
           def extract_titles(obj):
               titles = []
@@ -220,11 +267,28 @@ jobs:
                   if isinstance(data, dict):
                       data = data.get("items") or data.get("news") or data.get("titles") or []
                   if isinstance(data, list):
-                      return data
+                      parsed = []
+                      for item in data:
+                          if isinstance(item, str):
+                              s = item.strip()
+                              if s.startswith("{") and s.endswith("}"):
+                                  try:
+                                      parsed.append(json.loads(s))
+                                      continue
+                                  except Exception:
+                                      pass
+                          parsed.append(item)
+                      return parsed
               except Exception:
                   pass
               selected = []
               for line in text.splitlines():
+                  if "title" in line and "id" in line:
+                      try:
+                          selected.append(json.loads(line.rstrip(",，")))
+                          continue
+                      except Exception:
+                          pass
                   m = re.search(r"\d+", line)
                   if m:
                       selected.append({"id": int(m.group(0)), "title": clean_title(line)})
@@ -241,7 +305,7 @@ jobs:
                   title = re.sub(r"^(新闻|标题)[:：；;]?", "", title).strip()
                   if not is_good_title(title):
                       return False
-                  if category_count.get(category, 0) >= 4:
+                  if category_count.get(category, 0) >= CATEGORY_QUOTA.get(category, 2):
                       return False
                   key = re.sub(r"\W+", "", title.lower())[:60]
                   if key in seen:
@@ -275,7 +339,7 @@ jobs:
                   for item in candidates:
                       if len(cleaned) >= 15:
                           break
-                      if item["category"] == category:
+                      if item["category"] == category and category_count.get(category, 0) < CATEGORY_QUOTA.get(category, 2):
                           add(item["title"], item["category"])
 
               for item in candidates:
@@ -290,7 +354,7 @@ jobs:
               prompt = "\n".join([
                   "你是中文每日新闻编辑。请从候选新闻中筛选并改写 15 条，适合年轻人早上快速阅读。",
                   f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
-                  "只输出 JSON 数组，数组里正好 15 个对象。每个对象格式为 {\"id\": 候选编号, \"title\": \"改写后的中文标题\"}。不要输出日期、天气、编号、解释、Markdown。",
+                  "只输出 JSON 数组，数组里正好 15 个对象。每个对象格式为 {\"id\": 123, \"title\": \"改写后的中文标题\"}。不要输出日期、天气、编号、解释、Markdown，也不要把整个 JSON 对象写进 title。",
                   "选择规则：",
                   "1. 类别要均衡：国内民生、国际、财经商业、科技数码、文娱生活、城市消费都要覆盖；单一领域不超过 4 条。",
                   "2. 每条一眼看懂，必须包含具体主体、动作、结果。禁止写栏目式、评论式、趋势式空标题。",
@@ -298,7 +362,7 @@ jobs:
                   "4. 不要低信息标题：为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜。",
                   "5. 不要来源、链接、日期、评论数、括号媒体名。",
                   "6. 不要把开头写成“新闻；”。不要使用 A/B/C 或 E/F/G 编号。",
-                  "7. 必须选择候选新闻里的真实编号，不允许凭空编新闻。尽量选最近几天的新消息，明显过时的不要选。",
+                  "7. 必须选择候选新闻里的真实编号，不允许凭空编新闻。优先选择最近 5 天的新消息，明显过时的不要选。",
                   "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足，就不要选。",
                   "候选新闻：",
                   build_candidate_text(candidates),
@@ -348,7 +412,7 @@ jobs:
 
           now = datetime.now(BEIJING)
           weather = hangzhou_weather()
-          candidates = fetch_hot(fetch_rss(now))["items"]
+          candidates = sort_candidates(fetch_hot(fetch_rss(now))["items"])
           print(f"候选新闻数量：{len(candidates)}")
           titles = generate_titles(now, candidates)
           if len(titles) < 15:
