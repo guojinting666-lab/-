@@ -181,16 +181,13 @@ jobs:
               return "PM2.5较高，建议减少户外暴露"
 
           def weather_item():
-              url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset&timezone=Asia%2FShanghai&forecast_days=2"
+              url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai&forecast_days=2"
               d = json.loads(http_get(url, 25)).get("daily", {})
               code = int((d.get("weather_code") or [3])[0])
               desc = WEATHER_CODES.get(code, "天气待查")
               high = round(float((d.get("temperature_2m_max") or [0])[0]))
               low = round(float((d.get("temperature_2m_min") or [0])[0]))
               pop = (d.get("precipitation_probability_max") or [None])[0]
-              uv = (d.get("uv_index_max") or [None])[0]
-              sunrise = (d.get("sunrise") or [""])[0][-5:]
-              sunset = (d.get("sunset") or [""])[0][-5:]
               tomorrow_code = int((d.get("weather_code") or [3,3])[1])
               tomorrow_desc = WEATHER_CODES.get(tomorrow_code, "天气待查")
               tomorrow_high = round(float((d.get("temperature_2m_max") or [0,0])[1]))
@@ -201,21 +198,8 @@ jobs:
               parts = [f"今天杭州{desc}，{low}℃～{high}℃，{advice}"]
               if pop is not None:
                   parts.append(f"降水概率{int(pop)}%")
-              if uv is not None:
-                  parts.append(f"紫外线{round(float(uv), 1)}（{uv_note(uv)}）")
-              if sunrise and sunset:
-                  parts.append(f"日出{sunrise}，日落{sunset}")
 
-              try:
-                  aq = json.loads(http_get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=30.2741&longitude=120.1551&current=pm2_5,us_aqi&timezone=Asia%2FShanghai", 20)).get("current", {})
-                  if aq.get("us_aqi") is not None:
-                      parts.append(f"AQI {round(float(aq['us_aqi']))}（{aqi_note(aq.get('us_aqi'))}）")
-                  if aq.get("pm2_5") is not None:
-                      parts.append(f"PM2.5 {round(float(aq['pm2_5']), 1)}（{pm25_note(aq.get('pm2_5'))}）")
-              except Exception as e:
-                  print("air quality skipped:", str(e)[:160])
-
-              return "天气空气：" + "，".join(parts) + f"；明天{tomorrow_desc}，{tomorrow_low}℃～{tomorrow_high}℃"
+              return "天气：" + "，".join(parts) + f"；明天{tomorrow_desc}，{tomorrow_low}℃～{tomorrow_high}℃"
 
           def build_content():
               now = datetime.now(BEIJING)
@@ -245,7 +229,7 @@ jobs:
                       time.sleep(8 * attempt)
               raise RuntimeError("企业微信发送失败：" + str(last_error))
 
-          print("SCRIPT_VERSION: light-brief-v14-minimal-calendar")
+          print("SCRIPT_VERSION: light-brief-v15-simple-weather")
           content = build_content()
           print(content)
           send_wecom(content)
