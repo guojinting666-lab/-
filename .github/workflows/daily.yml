@@ -16,31 +16,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate clean light brief and push to WeCom
+      - name: Generate stable light brief and push to WeCom
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-          SILICONFLOW_MODEL: Qwen/Qwen2.5-7B-Instruct
           PYTHONIOENCODING: utf-8
         run: |
           python - <<'PY'
-          import email.utils
           import hashlib
           import html
           import json
           import os
           import re
+          import time
           import urllib.parse
           import urllib.request
-          import xml.etree.ElementTree as ET
           from datetime import datetime, timedelta, timezone
 
           BEIJING = timezone(timedelta(hours=8))
           STATE_FILE = ".brief_state.json"
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
-          SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY")
-          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL") or "Qwen/Qwen2.5-7B-Instruct"
-          SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
           WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
           CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
@@ -50,38 +44,31 @@ jobs:
           SOLAR_TERM_INFO = [0,21208,42467,63836,85337,107014,128867,150921,173149,195551,218072,240693,263343,285989,308563,331033,353350,375494,397447,419210,440795,462224,483532,504758]
           FOOTBALL_LEAGUES = [("世界杯", "fifa.world"), ("欧冠", "uefa.champions"), ("英超", "eng.1"), ("西甲", "esp.1"), ("意甲", "ita.1"), ("德甲", "ger.1"), ("法甲", "fra.1"), ("中超", "chn.1")]
           TEAM_ZH = {"Bosnia-Herz":"波黑","Bosnia and Herzegovina":"波黑","Canada":"加拿大","Paraguay":"巴拉圭","USA":"美国","United States":"美国","Switzerland":"瑞士","Qatar":"卡塔尔","England":"英格兰","Spain":"西班牙","France":"法国","Germany":"德国","Italy":"意大利","Brazil":"巴西","Argentina":"阿根廷"}
-          TECH_RSS = [("OpenAI", "https://openai.com/blog/rss.xml"), ("Apple", "https://www.apple.com/newsroom/rss-feed.rss"), ("Google", "https://blog.google/rss/"), ("Microsoft", "https://blogs.microsoft.com/feed/"), ("GitHub", "https://github.blog/feed/")]
 
           def http_get(url, timeout=20):
-              req = urllib.request.Request(url, headers={"User-Agent": "daily-light-brief/1.0"})
+              req = urllib.request.Request(url, headers={"User-Agent": "daily-light-brief/1.0 (personal WeCom brief)"})
               with urllib.request.urlopen(req, timeout=timeout) as r:
                   return r.read().decode("utf-8", "ignore")
 
-          def post_json(url, payload, timeout=30, headers=None):
+          def post_json(url, payload, timeout=60):
               data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-              h = {"Content-Type": "application/json"}
-              if headers:
-                  h.update(headers)
-              req = urllib.request.Request(url, data=data, headers=h, method="POST")
+              req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
               with urllib.request.urlopen(req, timeout=timeout) as r:
                   return r.read().decode("utf-8", "ignore")
 
           def clean(text):
               text = re.sub(r"<[^>]+>", "", text or "")
               text = html.unescape(text)
-              text = re.sub(r"\s+", " ", text).strip()
-              return text
+              return re.sub(r"\s+", " ", text).strip()
 
-          def looks_broken(text):
+          def broken(text):
               if not text:
                   return True
-              if " " in text or "□" in text:
+              if " " in text or "□" in text or "{" in text or "}" in text:
                   return True
               if re.search(r"\b(user|assistant|system|max_tokens|temperature)\b", text, re.I):
                   return True
               if re.search(r"(.{1,4})\1{4,}", text):
-                  return True
-              if "{" in text or "}" in text:
                   return True
               return False
 
@@ -96,7 +83,7 @@ jobs:
 
           STATE = load_state()
 
-          def mark_once(kind, text, keep=1200):
+          def mark_once(kind, text, keep=1000):
               key = hashlib.sha1(text.encode("utf-8")).hexdigest()
               used = STATE.setdefault("used", {}).setdefault(kind, [])
               if key in used:
@@ -110,102 +97,48 @@ jobs:
               with open(STATE_FILE, "w", encoding="utf-8") as f:
                   json.dump(STATE, f, ensure_ascii=False, indent=2)
 
-          def translate_short(text):
-              if not SILICONFLOW_API_KEY or re.search(r"[\u4e00-\u9fff]", text):
-                  return text
-              try:
-                  raw = post_json(
-                      SILICONFLOW_URL,
-                      {
-                          "model": SILICONFLOW_MODEL,
-                          "messages": [
-                              {"role": "system", "content": "只把英文标题翻译成自然中文，不解释，不扩写。"},
-                              {"role": "user", "content": text}
-                          ],
-                          "temperature": 0.1,
-                          "max_tokens": 120
-                      },
-                      timeout=45,
-                      headers={"Authorization": f"Bearer {SILICONFLOW_API_KEY}"},
-                  )
-                  out = clean(json.loads(raw)["choices"][0]["message"]["content"])
-                  if looks_broken(out) or not re.search(r"[\u4e00-\u9fff]", out):
-                      return text
-                  return out[:80]
-              except Exception:
-                  return text
-
           def date_line(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
-          def solar_term_for_year(year):
+          def solar_terms(year):
               base = datetime(1900, 1, 6, 2, 5, tzinfo=timezone.utc)
               out = []
               for i, name in enumerate(SOLAR_TERM_NAMES):
                   minutes = 525948.76 * (year - 1900) + SOLAR_TERM_INFO[i]
-                  day = (base + timedelta(minutes=minutes)).astimezone(BEIJING).date()
-                  out.append((day, name))
+                  out.append(((base + timedelta(minutes=minutes)).astimezone(BEIJING).date(), name))
               return out
 
           def calendar_item(now):
               today = now.date()
-              terms = solar_term_for_year(today.year) + solar_term_for_year(today.year + 1)
-              bits = []
-              for day, name in terms:
+              for day, name in solar_terms(today.year) + solar_terms(today.year + 1):
                   diff = (day - today).days
                   if diff == 0:
-                      bits.append(f"今天是{name}")
-                      break
+                      return f"日历节气：今天是{name}"
                   if 0 < diff <= 16:
-                      bits.append(f"距离{name}还有{diff}天")
-                      break
-              if now.weekday() == 4:
-                  bits.append("今天是周五，适合提前安排周末")
-              elif now.weekday() == 6:
-                  bits.append("今天是周日，适合给下周留一点缓冲")
-              return "日历节气：" + "；".join(bits) if bits else "日历节气：今天无临近节气"
+                      return f"日历节气：距离{name}还有{diff}天"
+              return "日历节气：今天无临近节气"
 
-          def uv_note(uv):
-              if uv is None:
-                  return ""
-              uv = float(uv)
-              if uv < 3:
-                  return "紫外线较弱"
-              if uv < 6:
-                  return "紫外线中等，久待户外建议防晒"
-              if uv < 8:
-                  return "紫外线较强，建议防晒"
+          def uv_note(v):
+              if v is None: return ""
+              v = float(v)
+              if v < 3: return "紫外线较弱"
+              if v < 6: return "紫外线中等，久待户外建议防晒"
+              if v < 8: return "紫外线较强，建议防晒"
               return "紫外线很强，尽量减少暴晒"
 
-          def aqi_note(aqi):
-              if aqi is None:
-                  return ""
-              aqi = float(aqi)
-              if aqi <= 50:
-                  return "空气好，适合户外"
-              if aqi <= 100:
-                  return "空气可接受"
-              if aqi <= 150:
-                  return "轻度污染，敏感人群少久待户外"
-              if aqi <= 200:
-                  return "中度污染，建议减少户外运动"
+          def aqi_note(v):
+              if v is None: return ""
+              v = float(v)
+              if v <= 50: return "空气好，适合户外"
+              if v <= 100: return "空气可接受"
+              if v <= 150: return "轻度污染，敏感人群少久待户外"
+              if v <= 200: return "中度污染，建议减少户外运动"
               return "污染较重，尽量减少户外活动"
 
-          def pm25_note(pm25):
-              if pm25 is None:
-                  return ""
-              pm25 = float(pm25)
-              if pm25 <= 35:
-                  return "PM2.5较低"
-              if pm25 <= 75:
-                  return "PM2.5偏高，敏感人群注意"
-              return "PM2.5较高，建议减少户外暴露"
-
-          def weather_air_item():
+          def weather_item():
               try:
-                  url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset&current=wind_speed_10m&timezone=Asia%2FShanghai&forecast_days=2"
-                  obj = json.loads(http_get(url, timeout=12))
-                  d = obj.get("daily", {})
+                  url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset&timezone=Asia%2FShanghai&forecast_days=2"
+                  d = json.loads(http_get(url, 20)).get("daily", {})
                   code = int((d.get("weather_code") or [3])[0])
                   desc = WEATHER_CODES.get(code, "天气待查")
                   high = round(float((d.get("temperature_2m_max") or [0])[0]))
@@ -214,51 +147,44 @@ jobs:
                   uv = (d.get("uv_index_max") or [None])[0]
                   sunrise = (d.get("sunrise") or [""])[0][-5:]
                   sunset = (d.get("sunset") or [""])[0][-5:]
-                  t_code = int((d.get("weather_code") or [3, 3])[1])
-                  t_desc = WEATHER_CODES.get(t_code, "天气待查")
-                  t_high = round(float((d.get("temperature_2m_max") or [0, 0])[1]))
-                  t_low = round(float((d.get("temperature_2m_min") or [0, 0])[1]))
-                  rain_codes = [51,53,55,61,63,65,80,81,82,95]
-                  advice = "建议带伞" if code in rain_codes or (pop is not None and int(pop) >= 50) else "适合正常出行"
-                  extra = []
+                  tomorrow_code = int((d.get("weather_code") or [3,3])[1])
+                  tomorrow_desc = WEATHER_CODES.get(tomorrow_code, "天气待查")
+                  tomorrow_high = round(float((d.get("temperature_2m_max") or [0,0])[1]))
+                  tomorrow_low = round(float((d.get("temperature_2m_min") or [0,0])[1]))
+                  advice = "建议带伞" if code in [51,53,55,61,63,65,80,81,82,95] or (pop is not None and int(pop) >= 50) else "适合正常出行"
+                  parts = [f"今天杭州{desc}，{low}℃～{high}℃，{advice}"]
                   if pop is not None:
-                      extra.append(f"降水概率{int(pop)}%")
+                      parts.append(f"降水概率{int(pop)}%")
                   if uv is not None:
-                      extra.append(f"紫外线{round(float(uv), 1)}（{uv_note(uv)}）")
+                      parts.append(f"紫外线{round(float(uv), 1)}（{uv_note(uv)}）")
                   if sunrise and sunset:
-                      extra.append(f"日出{sunrise}，日落{sunset}")
-                  air = ""
+                      parts.append(f"日出{sunrise}，日落{sunset}")
                   try:
-                      aq = json.loads(http_get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=30.2741&longitude=120.1551&current=pm2_5,us_aqi&timezone=Asia%2FShanghai", timeout=15)).get("current", {})
+                      aq = json.loads(http_get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=30.2741&longitude=120.1551&current=pm2_5,us_aqi&timezone=Asia%2FShanghai", 12)).get("current", {})
                       if aq.get("us_aqi") is not None:
-                          air += f"，AQI {round(float(aq['us_aqi']))}（{aqi_note(aq.get('us_aqi'))}）"
+                          parts.append(f"AQI {round(float(aq['us_aqi']))}（{aqi_note(aq.get('us_aqi'))}）")
                       if aq.get("pm2_5") is not None:
-                          air += f"，PM2.5 {round(float(aq['pm2_5']), 1)}（{pm25_note(aq.get('pm2_5'))}）"
+                          parts.append(f"PM2.5 {round(float(aq['pm2_5']), 1)}")
                   except Exception:
                       pass
-                  return f"天气空气：今天杭州{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extra) if extra else "") + air + f"；明天{t_desc}，{t_low}℃～{t_high}℃"
+                  return "天气空气：" + "，".join(parts) + f"；明天{tomorrow_desc}，{tomorrow_low}℃～{tomorrow_high}℃"
               except Exception:
                   return "天气空气：杭州天气暂时获取失败"
 
-          def wiki_on_this_day(now, limit=3):
+          def wiki_history_items(now, limit=3):
               items = []
               try:
-                  url = f"https://zh.wikipedia.org/api/rest_v1/feed/onthisday/events/{now.month}/{now.day}"
-                  obj = json.loads(http_get(url, timeout=10))
+                  obj = json.loads(http_get(f"https://zh.wikipedia.org/api/rest_v1/feed/onthisday/events/{now.month}/{now.day}", 12))
                   candidates = []
                   for ev in obj.get("events", []):
-                      text = clean(ev.get("text"))
-                      year = ev.get("year")
-                      if not text or not isinstance(year, int):
+                      year, text = ev.get("year"), clean(ev.get("text"))
+                      if not isinstance(year, int) or not text or len(text) > 105:
                           continue
-                      if any(x in text for x in ["出生", "逝世", "任命为", "签署了一项法律"]):
-                          continue
-                      if len(text) > 110:
+                      if any(x in text for x in ["出生", "逝世", "签署了一项法律", "州长"]):
                           continue
                       score = 0
-                      if year <= now.year - 50:
-                          score += 2
-                      if any(k in text for k in ["世界杯", "电影", "互联网", "计算机", "音乐", "奥运", "欧洲冠军", "发射", "发现", "首届", "最高法院"]):
+                      if year <= now.year - 50: score += 2
+                      if any(k in text for k in ["世界杯", "电影", "互联网", "计算机", "音乐", "奥运", "冠军", "发射", "发现", "首届", "最高法院", "战争"]):
                           score += 2
                       candidates.append((score, year, text))
                   candidates.sort(key=lambda x: (-x[0], x[1]))
@@ -267,94 +193,59 @@ jobs:
                       if mark_once("history", item):
                           items.append(item)
                       if len(items) >= limit:
-                          return items
+                          break
               except Exception as e:
-                  print("on-this-day skipped:", str(e)[:160])
+                  print("history skipped:", str(e)[:120])
               return items
-
-          def wiki_current_event_item(now):
-              if not SILICONFLOW_API_KEY:
-                  return None
-              for delta in [0, -1, -2]:
-                  day = now + timedelta(days=delta)
-                  page = f"Portal:Current events/{day.year} {day.strftime('%B')} {day.day}"
-                  url = "https://en.wikipedia.org/w/api.php?" + urllib.parse.urlencode({"action":"parse","page":page,"prop":"text","format":"json","formatversion":"2"})
-                  try:
-                      obj = json.loads(http_get(url, timeout=20))
-                      chunks = re.findall(r"<li>(.*?)</li>", obj.get("parse", {}).get("text", ""), flags=re.S)
-                      for raw in chunks:
-                          text = clean(raw)
-                          if not 45 <= len(text) <= 170:
-                              continue
-                          if any(x in text.lower() for x in ["death", "dies at", "crime", "shooting", "injured"]):
-                              continue
-                          zh = translate_short(text)
-                          zh = re.split(r"[。；;.!?？]", clean(zh))[0].strip()
-                          if looks_broken(zh) or not re.search(r"[\u4e00-\u9fff]", zh):
-                              continue
-                          item = f"维基近事：{zh[:70]}"
-                          if mark_once("current_event", item):
-                              return item
-                  except Exception as e:
-                      print("current event skipped:", str(e)[:160])
-              return None
 
           def wiki_topic_items(now, limit=6):
-              queries = ["人工智能", "智能手机", "电子游戏", "电影", "心理学", "经济学", "互联网", "足球", "咖啡", "睡眠", "城市交通", "杭州", "音乐", "科幻电影", "数据隐私", "机器学习", "新能源车", "健身", "博弈论", "认知偏误", "动画电影", "流媒体", "电子竞技", "摄影"]
-              bad = ["列表", "消歧义", "行政区", "道路", "车站", "村", "镇", "乡", "河流", "单曲", "政党", "市镇", "县", "页面不存在"]
+              topics = ["人工智能", "电影", "电子游戏", "心理学", "互联网", "足球", "咖啡", "睡眠", "音乐", "科幻电影", "数据隐私", "机器学习", "新能源车", "健身", "博弈论", "电子竞技", "摄影"]
+              query = topics[now.timetuple().tm_yday % len(topics)]
+              bad = ["列表", "消歧义", "行政区", "道路", "车站", "村", "镇", "乡", "河流", "单曲", "政党", "市镇", "县"]
               items = []
-              start = now.timetuple().tm_yday % len(queries)
-              failures = 0
-              for q in queries[start:] + queries[:start]:
-                  if len(items) >= limit:
-                      break
-                  if failures >= 8:
-                      break
-                  try:
-                      search_url = "https://zh.wikipedia.org/w/api.php?" + urllib.parse.urlencode({"action":"query","list":"search","srsearch":q,"srlimit":5,"format":"json","formatversion":"2"})
-                      result = json.loads(http_get(search_url, timeout=10))
-                      for hit in result.get("query", {}).get("search", []):
-                          title = clean(hit.get("title"))
-                          if not title or len(title) > 24 or any(x in title for x in bad):
-                              continue
-                          summary_url = "https://zh.wikipedia.org/api/rest_v1/page/summary/" + urllib.parse.quote(title.replace(" ", "_"), safe="")
-                          summary = json.loads(http_get(summary_url, timeout=10))
-                          extract = clean(summary.get("extract"))
-                          if len(extract) < 45 or looks_broken(extract):
-                              continue
-                          first = re.split(r"[。；;.!?？]", extract)[0].strip()
-                          if len(first) < 25:
-                              continue
-                          item = f"百科：{title}——{first[:72]}"
-                          if mark_once("wiki_topic", item):
-                              items.append(item)
-                              break
-                  except Exception as e:
-                      failures += 1
-                      print("wiki topic skipped:", q, str(e)[:120])
-              return items
-
-          def parse_pubdate(text):
               try:
-                  dt = email.utils.parsedate_to_datetime(text)
-                  if dt.tzinfo is None:
-                      dt = dt.replace(tzinfo=timezone.utc)
-                  return dt.astimezone(BEIJING)
-              except Exception:
-                  return None
+                  params = {
+                      "action": "query",
+                      "generator": "search",
+                      "gsrsearch": query,
+                      "gsrlimit": 8,
+                      "prop": "extracts",
+                      "exintro": 1,
+                      "explaintext": 1,
+                      "exchars": 130,
+                      "format": "json",
+                      "formatversion": "2",
+                  }
+                  obj = json.loads(http_get("https://zh.wikipedia.org/w/api.php?" + urllib.parse.urlencode(params), 12))
+                  pages = obj.get("query", {}).get("pages", [])
+                  for page in pages:
+                      title, extract = clean(page.get("title")), clean(page.get("extract"))
+                      if not title or not extract or len(title) > 24 or any(x in title for x in bad):
+                          continue
+                      first = re.split(r"[。；;.!?？]", extract)[0].strip()
+                      if len(first) < 25 or broken(first):
+                          continue
+                      item = f"百科：{title}——{first[:72]}"
+                      if mark_once("wiki_topic", item):
+                          items.append(item)
+                      if len(items) >= limit:
+                          break
+              except Exception as e:
+                  print("wiki topic skipped:", query, str(e)[:120])
+              return items
 
           def zh_team(name):
               return TEAM_ZH.get(name, name)
 
-          def football_summary_item(now):
+          def football_item(now):
               games, seen = [], set()
               for label, league in FOOTBALL_LEAGUES:
                   for delta in [-1, 0, 1]:
                       day = (now + timedelta(days=delta)).strftime("%Y%m%d")
                       url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard?dates={day}"
                       try:
-                          obj = json.loads(http_get(url, timeout=15))
-                          for event in obj.get("events", [])[:5]:
+                          obj = json.loads(http_get(url, 10))
+                          for event in obj.get("events", [])[:4]:
                               comp = (event.get("competitions") or [{}])[0]
                               teams = comp.get("competitors", [])
                               if len(teams) < 2:
@@ -365,7 +256,6 @@ jobs:
                               an = zh_team(away.get("team", {}).get("shortDisplayName") or away.get("team", {}).get("displayName") or "")
                               hs, ass = home.get("score"), away.get("score")
                               state = comp.get("status", {}).get("type", {}).get("state")
-                              detail = comp.get("status", {}).get("type", {}).get("shortDetail") or ""
                               key = f"{label}{an}{hn}{day}"
                               if key in seen:
                                   continue
@@ -376,8 +266,6 @@ jobs:
                                   games.append(f"{label} {an} vs {hn}")
                               elif hs is not None and ass is not None:
                                   games.append(f"{label} {an} {ass}-{hs} {hn}")
-                              elif detail:
-                                  games.append(f"{label} {an} vs {hn}")
                               if len(games) >= 3:
                                   return "足球：" + "；".join(games)
                       except Exception:
@@ -386,7 +274,7 @@ jobs:
 
           def steam_item():
               try:
-                  obj = json.loads(http_get("https://store.steampowered.com/api/featuredcategories?cc=cn&l=schinese", timeout=18))
+                  obj = json.loads(http_get("https://store.steampowered.com/api/featuredcategories?cc=cn&l=schinese", 15))
                   names = []
                   for x in obj.get("top_sellers", {}).get("items", []):
                       name = clean(x.get("name")).strip("《》")
@@ -396,51 +284,25 @@ jobs:
                           break
                   if names:
                       return "游戏：Steam 热销榜前列包括《" + "》《".join(names) + "》"
-              except Exception:
-                  pass
-              return None
-
-          def tech_item(now):
-              if not SILICONFLOW_API_KEY:
-                  return None
-              keywords = ["release", "launch", "announce", "security", "model", "update", "发布", "推出", "上线", "安全", "模型", "更新"]
-              for name, url in TECH_RSS:
-                  try:
-                      root = ET.fromstring(http_get(url, timeout=18))
-                      for item in root.findall(".//item")[:8]:
-                          title = clean(item.findtext("title"))
-                          pub = parse_pubdate(item.findtext("pubDate"))
-                          if pub and now - pub > timedelta(days=14):
-                              continue
-                          if title and len(title) <= 110 and any(k.lower() in title.lower() for k in keywords):
-                              title = translate_short(title)
-                              if looks_broken(title):
-                                  continue
-                              return f"科技：{name} 官方更新，{title}"
-                  except Exception:
-                      continue
+              except Exception as e:
+                  print("steam skipped:", str(e)[:120])
               return None
 
           def build_content():
               now = datetime.now(BEIJING)
-              items = [weather_air_item(), calendar_item(now)]
-              near = wiki_current_event_item(now)
-              if near:
-                  items.append(near)
-              items.extend(wiki_on_this_day(now, 3))
+              items = [weather_item(), calendar_item(now)]
+              items.extend(wiki_history_items(now, 3))
               items.extend(wiki_topic_items(now, 6))
-              for optional in [football_summary_item(now), steam_item(), tech_item(now)]:
+              for optional in [football_item(now), steam_item()]:
                   if optional:
                       items.append(optional)
-
               final, seen = [], set()
               for item in items:
                   item = clean(item)
-                  if not item or item in seen or looks_broken(item):
+                  if not item or item in seen or broken(item):
                       continue
                   seen.add(item)
                   final.append(item)
-
               lines = ["每日轻量晨报", date_line(now)]
               for i, item in enumerate(final[:15], 1):
                   lines.append(f"{i}、{item}；")
@@ -449,12 +311,22 @@ jobs:
           def send_wecom(content):
               if not WECOM_WEBHOOK:
                   raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
-              raw = post_json(WECOM_WEBHOOK, {"msgtype": "markdown", "markdown": {"content": content}})
-              print(raw)
-              if json.loads(raw).get("errcode") != 0:
-                  raise RuntimeError("企业微信返回失败：" + raw)
+              payload = {"msgtype": "markdown", "markdown": {"content": content}}
+              last_error = None
+              for attempt in range(1, 4):
+                  try:
+                      raw = post_json(WECOM_WEBHOOK, payload, timeout=60)
+                      print(raw)
+                      if json.loads(raw).get("errcode") == 0:
+                          return
+                      last_error = raw
+                  except Exception as e:
+                      last_error = str(e)
+                      print(f"wecom send attempt {attempt} failed:", last_error[:200])
+                      time.sleep(8 * attempt)
+              raise RuntimeError("企业微信发送失败：" + str(last_error))
 
-          print("SCRIPT_VERSION: light-brief-v11-wiki-clean")
+          print("SCRIPT_VERSION: light-brief-v12-stable")
           content = build_content()
           print(content)
           send_wecom(content)
