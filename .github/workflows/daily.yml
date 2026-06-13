@@ -1,21 +1,19 @@
-name: 每日新闻推送
+name: Daily News Push
 
 on:
   workflow_dispatch:
   schedule:
-    # GitHub 使用 UTC 时间；00:00 UTC = 北京时间 08:00
+    # 00:00 UTC = 08:00 Beijing time
     - cron: "0 0 * * *"
 
 jobs:
   send-news:
     runs-on: ubuntu-latest
     steps:
-      - name: 生成每日新闻并推送企业微信
+      - name: Generate daily news and push to WeCom
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-          # 如果这个模型不可用，到 GitHub Variables 里加 SILICONFLOW_MODEL 覆盖它。
-          SILICONFLOW_MODEL: ${{ vars.SILICONFLOW_MODEL || 'Qwen/Qwen2.5-7B-Instruct' }}
         run: |
           python - <<'PY'
           import email.utils
@@ -31,7 +29,7 @@ jobs:
           BEIJING = timezone(timedelta(hours=8))
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
           SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY")
-          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL") or "Qwen/Qwen2.5-7B-Instruct"
+          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct")
           SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
           WEATHER_CODES = {0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",51:"小毛毛雨",53:"毛毛雨",55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"}
@@ -63,13 +61,22 @@ jobs:
           BAD_SOURCE_WORDS = ["每日一言","历史上的今天","今日油价","彩票","星座","养生","鸡汤","广告","扫码","关注公众号"]
 
           def http_get(url, timeout=25):
-              req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125 Safari/537.36","Accept":"application/json,application/xml,text/xml,text/html,*/*","Accept-Language":"zh-CN,zh;q=0.9"})
+              req = urllib.request.Request(url, headers={
+                  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125 Safari/537.36",
+                  "Accept":"application/json,application/xml,text/xml,text/html,*/*",
+                  "Accept-Language":"zh-CN,zh;q=0.9",
+              })
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
-          def http_post_json(url, payload, headers=None, timeout=80):
+          def http_post_json(url, payload, headers=None, timeout=90):
               data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-              req = urllib.request.Request(url, data=data, headers=headers or {"Content-Type":"application/json; charset=utf-8"}, method="POST")
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  headers=headers or {"Content-Type":"application/json; charset=utf-8"},
+                  method="POST",
+              )
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
@@ -175,34 +182,37 @@ jobs:
           def generate_with_siliconflow(now, weather, candidates):
               if not SILICONFLOW_API_KEY:
                   raise RuntimeError("缺少 GitHub Secret：SILICONFLOW_API_KEY")
-              candidate_text = "\n".join(f"- {x['title']}（来源:{x['source']}{'，时间:'+x['time'] if x['time'] else ''}）" for x in candidates[:140])
-              prompt = f"""
-你是一个每日新闻编辑。请只从候选标题中筛选和改写，不要编造候选外的新事实。
-
-今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。
-输出格式必须严格如下：
-每日新闻
-{format_date(now)}
-{weather}
-
-1、新闻；
-2、新闻；
-...
-15、新闻；
-
-筛选规则：
-1. 必须输出15条。
-2. 类型雨露均沾：国内社会/民生、国际、财经商业、科技数码、文娱生活都要有，任何单一领域不能超过4条。
-3. 适合年轻人早上快速阅读。
-4. 标题必须一眼看懂新闻内容，不要“为什么/怎么回事/一文读懂/背后原因/引热议/冲上热搜/报告/研报/透视/年终报道/市场介绍/宏大叙事”这类。
-5. 尽量选最近几天的新消息；候选里有明确旧年份或明显过时内容的不要选。
-6. 默认不要足球新闻。
-7. 每条只写一句，30到55个中文字符左右，保留关键主体、动作和结果。
-8. 不要来源、不要日期、不要解释、不要小标题。
-
-候选标题：
-{candidate_text}
-""".strip()
+              candidate_text = "\n".join(
+                  f"- {x['title']}（来源:{x['source']}{'，时间:'+x['time'] if x['time'] else ''}）"
+                  for x in candidates[:140]
+              )
+              prompt_lines = [
+                  "你是一个每日新闻编辑。请只从候选标题中筛选和改写，不要编造候选外的新事实。",
+                  f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
+                  "输出格式必须严格如下：",
+                  "每日新闻",
+                  format_date(now),
+                  weather,
+                  "",
+                  "1、新闻；",
+                  "2、新闻；",
+                  "...",
+                  "15、新闻；",
+                  "",
+                  "筛选规则：",
+                  "1. 必须输出15条。",
+                  "2. 类型雨露均沾：国内社会/民生、国际、财经商业、科技数码、文娱生活都要有，任何单一领域不能超过4条。",
+                  "3. 适合年轻人早上快速阅读。",
+                  "4. 标题必须一眼看懂新闻内容，不要为什么、怎么回事、一文读懂、背后原因、引热议、冲上热搜、报告、研报、透视、年终报道、市场介绍、宏大叙事这类。",
+                  "5. 尽量选最近几天的新消息；候选里有明确旧年份或明显过时内容的不要选。",
+                  "6. 默认不要足球新闻。",
+                  "7. 每条只写一句，30到55个中文字符左右，保留关键主体、动作和结果。",
+                  "8. 不要来源、不要日期、不要解释、不要小标题。",
+                  "",
+                  "候选标题：",
+                  candidate_text,
+              ]
+              prompt = "\n".join(prompt_lines)
               payload = {
                   "model": SILICONFLOW_MODEL,
                   "messages": [
