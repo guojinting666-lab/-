@@ -15,6 +15,7 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           python - <<'PY'
+          import email.utils
           import html
           import json
           import os
@@ -23,6 +24,7 @@ jobs:
           import urllib.request
           import xml.etree.ElementTree as ET
           from datetime import datetime, timedelta, timezone
+          from html.parser import HTMLParser
 
           BEIJING = timezone(timedelta(hours=8))
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
@@ -41,46 +43,27 @@ jobs:
                      "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日",
                      "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
 
-          HOT_ENDPOINTS = [
-              ("综合", "https://api-hot.imsyy.top/baidu"),
-              ("综合", "https://api-hot.imsyy.top/toutiao"),
-              ("综合", "https://api-hot.imsyy.top/weibo"),
-              ("综合", "https://api-hot.imsyy.top/zhihu"),
-              ("国际", "https://api-hot.imsyy.top/thepaper"),
-              ("科技", "https://api-hot.imsyy.top/36kr"),
-              ("科技", "https://api-hot.imsyy.top/ithome"),
-              ("文娱", "https://api-hot.imsyy.top/bilibili"),
-              ("文娱", "https://api-hot.imsyy.top/douyin"),
-              ("足球", "https://api-hot.imsyy.top/hupu"),
-              ("足球", "https://api-hot.imsyy.top/dongqiudi"),
-          ]
-
-          RSS_FALLBACKS = [
-              ("足球", "足球 世界杯 欧冠 英超 西甲 中超 国足 转会 比分"),
-              ("国际", "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 最新"),
-              ("国内", "中国 国内 社会 民生 教育 医疗 交通 新规 最新"),
-              ("商业", "财经 商业 公司 股市 汽车 新能源 消费 市场 最新"),
-              ("科技", "科技 手机 芯片 机器人 互联网 游戏 AI 最新"),
-              ("文娱", "电影 音乐 文娱 票房 旅游 年轻人 消费 最新"),
-          ]
+          QUOTAS = {"足球": 2, "国际": 3, "国内": 3, "商业": 2, "科技": 2, "文娱": 3}
 
           CATEGORY_WORDS = {
-              "足球": ["足球", "世界杯", "欧冠", "英超", "西甲", "意甲", "德甲", "中超", "国足", "转会", "进球", "比分", "击败", "战胜"],
-              "国际": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "总统", "政府", "制裁", "冲突", "停火", "访问"],
+              "足球": ["足球", "世界杯", "欧冠", "英超", "西甲", "意甲", "德甲", "中超", "国足", "转会", "进球", "比分", "击败", "战胜", "巴萨", "皇马", "曼联", "阿森纳", "梅西", "C罗"],
+              "国际": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "总统", "政府", "制裁", "冲突", "停火", "访问", "G7", "北约"],
               "国内": ["中国", "国内", "杭州", "北京", "上海", "广州", "教育", "高考", "医疗", "医保", "交通", "铁路", "天气", "消费", "新规", "警方", "法院"],
-              "商业": ["财经", "股市", "A股", "港股", "美元", "人民币", "房价", "楼市", "公司", "上市", "汽车", "新能源", "特斯拉", "比亚迪", "市场"],
+              "商业": ["财经", "股市", "A股", "港股", "美元", "人民币", "房价", "楼市", "公司", "上市", "汽车", "新能源", "特斯拉", "比亚迪", "市场", "财报"],
               "科技": ["科技", "AI", "人工智能", "大模型", "芯片", "手机", "华为", "苹果", "小米", "英伟达", "机器人", "互联网", "游戏"],
-              "文娱": ["电影", "票房", "音乐", "演唱会", "文娱", "旅游", "消费", "年轻人", "就业", "教育", "游戏", "社交"],
+              "文娱": ["电影", "票房", "音乐", "演唱会", "文娱", "旅游", "消费", "年轻人", "就业", "教育", "游戏", "社交", "B站", "抖音"],
           }
 
           BAD_WORDS = [
               "学习贯彻", "重要讲话", "会议指出", "会议强调", "高质量发展", "现代化建设",
-              "工作会议", "座谈会", "主题教育", "党建", "党纪", "每日一言", "历史上的今天",
-              "今日油价", "彩票", "星座", "养生", "鸡汤", "一图读懂", "一文读懂",
-              "背后原因", "原因找到了", "网友炸锅", "冲上热搜", "引热议", "什么情况",
-              "怎么回事", "为何", "为什么", "你怎么看", "速看", "注意了", "分析人士",
-              "深度研报", "研报：", "透视", "年终报道", "市场介绍", "操盘必读",
-              "财经媒体报道汇总", "盘点", "观察", "评论：", "社论：", "专访：",
+              "工作会议", "座谈会", "主题教育", "党建", "党纪", "公报", "白皮书",
+              "每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤",
+              "一图读懂", "一文读懂", "背后原因", "原因找到了", "网友炸锅", "冲上热搜",
+              "引热议", "什么情况", "怎么回事", "为何", "为什么", "你怎么看", "速看",
+              "注意了", "分析人士", "报告：", "报告称", "深度研报", "研报：", "透视",
+              "年终报道", "市场介绍", "操盘必读", "财经媒体报道汇总", "影响股市利好或利空",
+              "盘点", "观察", "评论：", "社论：", "专访：", "战略报告", "统计公报",
+              "一场意志", "制度的较量", "可持续增长答卷", "新基建",
           ]
 
           FACT_WORDS = [
@@ -91,9 +74,28 @@ jobs:
               "签约", "加盟", "续约", "裁员", "收购", "出售", "上市", "停产", "量产",
               "交付", "发射", "坠毁", "击败", "战胜", "逆转", "夺冠", "晋级", "出局",
               "破门", "双响", "助攻", "开售", "开通", "停运", "延误", "回应", "辟谣",
+              "被曝", "将赴", "会谈", "发放", "免征", "上调", "下调",
           ]
 
-          QUOTAS = {"足球": 2, "国际": 3, "国内": 3, "商业": 2, "科技": 2, "文娱": 3}
+          HOT_ENDPOINTS = [
+              ("国内", "https://api-hot.imsyy.top/baidu"),
+              ("国内", "https://api-hot.imsyy.top/toutiao"),
+              ("国内", "https://api-hot.imsyy.top/weibo"),
+              ("国内", "https://api-hot.imsyy.top/zhihu"),
+              ("科技", "https://api-hot.imsyy.top/36kr"),
+              ("科技", "https://api-hot.imsyy.top/ithome"),
+              ("文娱", "https://api-hot.imsyy.top/bilibili"),
+              ("文娱", "https://api-hot.imsyy.top/douyin"),
+          ]
+
+          RSS_QUERIES = [
+              ("足球", "足球 世界杯 欧冠 英超 西甲 中超 国足 转会 比分 懂球帝 直播吧"),
+              ("国际", "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 最新 宣布"),
+              ("国内", "中国 国内 社会 民生 教育 医疗 交通 新规 警方 法院 最新"),
+              ("商业", "财经 商业 公司 股市 汽车 新能源 消费 市场 宣布 发布"),
+              ("科技", "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线 宣布"),
+              ("文娱", "电影 音乐 文娱 票房 旅游 年轻人 消费 生活 教育 就业 最新"),
+          ]
 
           def http_get(url, timeout=20):
               req = urllib.request.Request(
@@ -112,27 +114,33 @@ jobs:
               text = re.sub(r"<[^>]+>", "", text)
               text = re.sub(r"^\s*\d+[、.．]\s*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
+              text = re.sub(r"_\d{4}年\d{1,2}月\d{1,2}日_.*$", "", text)
               text = re.sub(r"\s+", " ", text).strip()
               return text.strip("；;，,。 ")
 
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
 
-          def useful_title(text):
-              if not text or len(text) < 10 or len(text) > 110 or not has_chinese(text):
+          def reject_old_years(text, current_year):
+              years = [int(y) for y in re.findall(r"20\d{2}", text)]
+              return any(y < current_year for y in years)
+
+          def useful_title(text, current_year):
+              if not text or len(text) < 12 or len(text) > 110 or not has_chinese(text):
+                  return False
+              if reject_old_years(text, current_year):
                   return False
               if any(x in text for x in BAD_WORDS):
                   return False
               if re.fullmatch(r"[\d\s:：/-]+", text):
                   return False
-              # 热榜标题不一定完美，但至少要有数字、冒号、明确动作词或比赛比分之一。
               if re.search(r"\d+\s*[-:：比]\s*\d+", text):
                   return True
-              if "：" in text or ":" in text:
-                  return True
-              if re.search(r"\d", text):
+              if re.search(r"^[\u4e00-\u9fffA-Za-z]{1,8}[:：].*(宣布|确认|将|已|因|对|向|在|为|以|获|被|成|称)", text):
                   return True
               if any(x in text for x in FACT_WORDS):
+                  return True
+              if re.search(r"\d", text) and ("：" in text or ":" in text):
                   return True
               return False
 
@@ -157,7 +165,7 @@ jobs:
               walk(value)
               return titles
 
-          def fetch_hot():
+          def fetch_hot(now):
               items = []
               for default_category, url in HOT_ENDPOINTS:
                   try:
@@ -165,29 +173,89 @@ jobs:
                       obj = json.loads(raw)
                       for title in extract_titles_from_json(obj):
                           title = clean_text(title)
-                          if useful_title(title):
+                          if useful_title(title, now.year):
                               items.append((classify(title, default_category), title))
                   except Exception:
                       continue
               return items
 
           def rss_url(query):
-              params = {"q": query, "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
+              params = {"q": query + " when:1d", "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
               return "https://news.google.com/rss/search?" + urllib.parse.urlencode(params)
 
-          def fetch_rss():
+          def parse_pubdate(text):
+              try:
+                  dt = email.utils.parsedate_to_datetime(text)
+                  if dt.tzinfo is None:
+                      dt = dt.replace(tzinfo=timezone.utc)
+                  return dt.astimezone(BEIJING)
+              except Exception:
+                  return None
+
+          def fetch_rss(now):
               items = []
-              for default_category, query in RSS_FALLBACKS:
+              for default_category, query in RSS_QUERIES:
                   try:
                       raw = http_get(rss_url(query))
                       root = ET.fromstring(raw)
-                      for item in root.findall(".//item")[:30]:
+                      for item in root.findall(".//item")[:45]:
                           title = clean_text(item.findtext("title"))
-                          if useful_title(title):
+                          pub = parse_pubdate(item.findtext("pubDate"))
+                          if pub and not (now - timedelta(hours=30) <= pub <= now + timedelta(minutes=10)):
+                              continue
+                          if useful_title(title, now.year):
                               items.append((classify(title, default_category), title))
                   except Exception:
                       continue
               return items
+
+          class DqdParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.href = None
+                  self.text = []
+                  self.titles = []
+              def handle_starttag(self, tag, attrs):
+                  if tag == "a":
+                      self.href = dict(attrs).get("href", "")
+                      self.text = []
+              def handle_data(self, data):
+                  if self.href is not None:
+                      self.text.append(data)
+              def handle_endtag(self, tag):
+                  if tag == "a" and self.href is not None:
+                      href = self.href or ""
+                      title = clean_text("".join(self.text))
+                      if "/articles/" in href or "dongqiudi.com/articles/" in href:
+                          self.titles.append(title)
+                      self.href = None
+                      self.text = []
+
+          def strip_dqd_meta(text):
+              text = re.sub(r"^足球\s+", "", text)
+              for _ in range(6):
+                  old = text
+                  text = re.sub(r"\s*\d{1,2}[-/]\d{1,2}\s*$", "", text)
+                  text = re.sub(r"\s*\d+\s*评\s*$", "", text)
+                  text = re.sub(r"\s*(世界杯|五洲|英超|西甲|意甲|德甲|法甲|中超|国足|女足|足球){1,6}\s*$", "", text)
+                  text = text.strip(" ·-｜|")
+                  if old == text:
+                      break
+              return text
+
+          def fetch_football_from_dqd(now):
+              try:
+                  raw = http_get("https://www.dongqiudi.com/")
+                  parser = DqdParser()
+                  parser.feed(raw)
+                  out = []
+                  for title in parser.titles:
+                      title = strip_dqd_meta(clean_text(title))
+                      if useful_title(title, now.year):
+                          out.append(("足球", title))
+                  return out[:8]
+              except Exception:
+                  return []
 
           def dedupe(items):
               out = []
@@ -204,30 +272,25 @@ jobs:
               buckets = {k: [] for k in QUOTAS}
               for category, title in items:
                   buckets.setdefault(category, []).append(title)
-
               picked = []
               used = set()
+              counts = {k: 0 for k in QUOTAS}
               for category, quota in QUOTAS.items():
                   for title in buckets.get(category, [])[:quota]:
                       if title not in used:
                           picked.append(title)
                           used.add(title)
-
-              # 如果某类不足，用其他类补足，但单类最多5条，避免霸榜。
-              counts = {k: 0 for k in QUOTAS}
-              for title in picked:
-                  counts[classify(title)] = counts.get(classify(title), 0) + 1
+                          counts[category] += 1
               for category, title in items:
                   if len(picked) >= TARGET_TOTAL:
                       break
                   if title in used:
                       continue
-                  c = classify(title, category)
-                  if counts.get(c, 0) >= 5:
+                  if counts.get(category, 0) >= 5:
                       continue
                   picked.append(title)
                   used.add(title)
-                  counts[c] = counts.get(c, 0) + 1
+                  counts[category] = counts.get(category, 0) + 1
               return picked[:TARGET_TOTAL]
 
           def get_hangzhou_weather():
@@ -279,7 +342,9 @@ jobs:
                   raise RuntimeError(f"企业微信返回失败：{body}")
 
           now = datetime.now(BEIJING)
-          news = choose_balanced(fetch_hot() + fetch_rss())
+          # 足球先放最前，保证1-2条；RSS负责过去24小时，懂球帝首页作为足球兜底。
+          items = fetch_rss(now) + fetch_football_from_dqd(now) + fetch_hot(now)
+          news = choose_balanced(items)
           lines = ["每日新闻", format_date(now), get_hangzhou_weather(), ""]
           if news:
               for idx, item in enumerate(news, 1):
