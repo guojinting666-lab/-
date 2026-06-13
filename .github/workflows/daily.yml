@@ -1,19 +1,18 @@
-name: Daily News Push
+name: Daily Light Brief
 
 on:
   workflow_dispatch:
   schedule:
+    # 00:00 UTC = 08:00 Beijing time
     - cron: "0 0 * * *"
 
 jobs:
-  send-news:
+  send-brief:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate daily news and push to WeCom
+      - name: Generate light brief and push to WeCom
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-          SILICONFLOW_MODEL: Qwen/Qwen2.5-7B-Instruct
         run: |
           python - <<'PY'
           import email.utils
@@ -25,50 +24,39 @@ jobs:
           import urllib.request
           import xml.etree.ElementTree as ET
           from datetime import datetime, timedelta, timezone
-          from difflib import SequenceMatcher
 
           BEIJING = timezone(timedelta(hours=8))
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
-          SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY")
-          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL") or "Qwen/Qwen2.5-7B-Instruct"
-          SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
           WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
           CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
           CN_DAYS = ["", "一日", "二日", "三日", "四日", "五日", "六日", "七日", "八日", "九日", "十日", "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日", "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
           WEATHER_CODES = {0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",48:"雾凇",51:"小毛毛雨",53:"毛毛雨",55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"}
 
-          CATEGORIES = {
-              "国内民生": ["中国 社会 民生 教育 医疗 交通 政策 消费 最新", "国内 公共服务 城市治理 出行 就业 教育 最新"],
-              "国际": ["国际 美国 欧洲 日本 韩国 中东 俄乌 G7 最新", "全球 外交 安全 能源 贸易 冲突 最新"],
-              "科技数码": ["科技 AI 手机 芯片 机器人 游戏 互联网 发布 最新", "数码 大模型 App 半导体 智能硬件 新品 最新"],
-              "财经商业": ["商业 公司 汽车 新能源 消费 平台 监管 最新", "财经 消费 企业 产品 价格 市场 最新 -股票 -股价"],
-              "文娱生活": ["电影 音乐 演唱会 剧集 综艺 票房 旅游 最新", "文娱 生活方式 文旅 消费 年轻人 最新"],
-              "杭州本地": ["杭州 浙江 本地 交通 天气 消费 民生 活动 最新", "杭州 本地 AI 城市服务 文旅 交通 最新"],
-          }
-
-          HOT_ENDPOINTS = [
-              "https://api-hot.imsyy.top/baidu",
-              "https://api-hot.imsyy.top/toutiao",
-              "https://api-hot.imsyy.top/weibo",
-              "https://api-hot.imsyy.top/zhihu",
-              "https://api-hot.imsyy.top/thepaper",
-              "https://api-hot.imsyy.top/36kr",
-              "https://api-hot.imsyy.top/ithome",
-              "https://api-hot.imsyy.top/bilibili",
-              "https://api-hot.imsyy.top/douyin",
+          HOLIDAYS_2026 = [
+              ("端午节", "2026-06-19"),
+              ("中秋节", "2026-09-25"),
+              ("国庆节", "2026-10-01"),
           ]
 
-          HARD_BAD = [
-              "股票股价", "股价", "财报", "证券", "研报", "投行", "路演", "银行", "征信", "减持", "套现",
-              "电话会议", "分析师", "目标价", "每股", "港股", "A股", "美股", "基金", "彩票", "星座",
-              "每日一言", "历史上的今天", "广告", "扫码", "关注公众号", "新刊速递", "专刊", "创刊",
-              "主题党日", "党支部", "研讨会", "论坛", "活动周", "文选", "主要篇目", "手机新浪网",
-              "第几", "多少", "为何", "为什么", "一文读懂", "怎么回事", "藏着", "出圈", "私享会",
-              "花钱找虐", "班味", "微度假", "点亮美好生活", "服务焕新", "新蓝海", "软文",
+          FOOTBALL_LEAGUES = [
+              ("世界杯", "fifa.world"),
+              ("欧冠", "uefa.champions"),
+              ("英超", "eng.1"),
+              ("西甲", "esp.1"),
+              ("意甲", "ita.1"),
+              ("德甲", "ger.1"),
+              ("法甲", "fra.1"),
+              ("中超", "chn.1"),
           ]
-          SOFT_BAD = ["保持活跃", "成为焦点", "需求释放", "继续推进", "助力", "赋能", "焕新", "新风向", "新趋势", "新格局", "破局", "生态"]
-          EXCLUDES = " " + " ".join("-" + x for x in ["股票","股价","财报","证券","银行","研报","论坛","研讨会","主题党日","专刊","新刊速递","第几","多少","为何","一文读懂"])
+
+          TECH_RSS = [
+              ("OpenAI", "https://openai.com/blog/rss.xml"),
+              ("Apple", "https://www.apple.com/newsroom/rss-feed.rss"),
+              ("Google", "https://blog.google/rss/"),
+              ("Microsoft", "https://blogs.microsoft.com/feed/"),
+              ("GitHub", "https://github.blog/feed/"),
+          ]
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
@@ -79,152 +67,27 @@ jobs:
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
-          def post_json(url, payload, headers, timeout=100):
+          def post_json(url, payload, timeout=30):
               data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-              req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  headers={"Content-Type": "application/json; charset=utf-8"},
+                  method="POST",
+              )
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
-          def clean_title(text):
-              text = html.unescape(str(text or "")).strip()
-              if text.startswith("{") and text.endswith("}"):
-                  try:
-                      obj = json.loads(text)
-                      text = obj.get("title") or obj.get("name") or ""
-                  except Exception:
-                      pass
+          def clean(text):
+              text = html.unescape(str(text or ""))
               text = re.sub(r"<[^>]+>", "", text)
-              text = re.sub(r"^\s*[\dA-Za-z]+[\.\)、:：\-\s]*", "", text)
-              text = re.sub(r"\((SH|SZ|HK|NASDAQ|NYSE)?\d{4,6}\)", "", text, flags=re.I)
-              text = re.sub(r"[-_｜|].*?(ITBear|商业消费|东方财富|证券|股吧|客户端|手机新浪网).*$", "", text, flags=re.I)
-              text = re.sub(r"\s+-\s+[^-]+$", "", text)
               text = re.sub(r"\s+", " ", text).strip()
-              return text.strip(" ；;，,。\"'")
+              return text.strip(" ；;，,。")
 
-          def has_chinese(text):
-              return bool(re.search(r"[\u4e00-\u9fff]", text or ""))
+          def date_line(now):
+              return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
-          def dup_key(text):
-              return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", clean_title(text)).lower()
-
-          def too_similar(title, existing):
-              k = dup_key(title)
-              if not k:
-                  return True
-              for old in existing:
-                  o = dup_key(old)
-                  if not o:
-                      continue
-                  if k in o or o in k:
-                      return True
-                  if SequenceMatcher(None, k, o).ratio() >= 0.76:
-                      return True
-              return False
-
-          def parse_pubdate(text):
-              try:
-                  dt = email.utils.parsedate_to_datetime(text)
-                  if dt.tzinfo is None:
-                      dt = dt.replace(tzinfo=timezone.utc)
-                  return dt.astimezone(BEIJING)
-              except Exception:
-                  return None
-
-          def reject_title(title, strict=True):
-              title = clean_title(title)
-              if not title or not has_chinese(title):
-                  return True
-              if len(title) < 10 or len(title) > 95:
-                  return True
-              if any(x in title for x in HARD_BAD):
-                  return True
-              if strict and any(x in title for x in SOFT_BAD):
-                  return True
-              if re.search(r"股票|股价|\([A-Z]{0,6}\d{4,6}\)|\d{5,6}\)股票|手机新浪网|_手机新浪网", title, re.I):
-                  return True
-              return False
-
-          def add_candidate(store, title, category, source, pub=None):
-              title = clean_title(title)
-              if reject_title(title, strict=False):
-                  return
-              if too_similar(title, [x["title"] for x in store["items"]]):
-                  return
-              store["items"].append({
-                  "id": len(store["items"]) + 1,
-                  "title": title,
-                  "category": category,
-                  "source": source,
-                  "time": pub.strftime("%Y-%m-%d %H:%M") if pub else "",
-                  "has_time": bool(pub),
-              })
-
-          def rss_urls(query):
-              query = query + EXCLUDES
-              google = "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q": query + " when:3d", "hl":"zh-CN", "gl":"CN", "ceid":"CN:zh-Hans"})
-              bing = "https://www.bing.com/news/search?" + urllib.parse.urlencode({"q": query, "format":"rss", "setlang":"zh-CN", "cc":"cn"})
-              return [google, bing]
-
-          def fetch_rss(now):
-              store = {"items": []}
-              for category, queries in CATEGORIES.items():
-                  for query in queries:
-                      for url in rss_urls(query):
-                          try:
-                              root = ET.fromstring(http_get(url))
-                              for item in root.findall(".//item")[:80]:
-                                  pub = parse_pubdate(item.findtext("pubDate"))
-                                  if pub and not (now - timedelta(days=3) <= pub <= now + timedelta(minutes=30)):
-                                      continue
-                                  add_candidate(store, item.findtext("title"), category, "rss", pub)
-                          except Exception:
-                              pass
-              return store
-
-          def extract_titles(obj):
-              out = []
-              def walk(v):
-                  if isinstance(v, dict):
-                      for key in ["title", "name", "word", "desc", "hot_word", "keyword"]:
-                          if isinstance(v.get(key), str):
-                              out.append(v[key])
-                      for child in v.values():
-                          walk(child)
-                  elif isinstance(v, list):
-                      for child in v:
-                          walk(child)
-              walk(obj)
-              return out
-
-          def fetch_hot(store):
-              for url in HOT_ENDPOINTS:
-                  try:
-                      obj = json.loads(http_get(url, timeout=18))
-                      for title in extract_titles(obj):
-                          add_candidate(store, title, "热点", "hot", None)
-                  except Exception:
-                      pass
-              return store
-
-          def score(item):
-              title = item["title"]
-              s = 0
-              if item["has_time"]:
-                  s += 80
-              if item["category"] != "热点":
-                  s += 15
-              if re.search(r"\d|%|％|万|亿|℃", title):
-                  s += 8
-              if re.search(r"宣布|发布|通过|启动|上线|下调|上调|恢复|暂停|签署|调查|召回|上映|定档|访问|提醒|预警", title):
-                  s += 12
-              if any(x in title for x in SOFT_BAD):
-                  s -= 25
-              return s
-
-          def sort_candidates(items):
-              return sorted(items, key=score, reverse=True)
-
-          def hangzhou_weather():
+          def weather_line():
               url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&current=wind_speed_10m&timezone=Asia%2FShanghai&forecast_days=1"
               try:
                   obj = json.loads(http_get(url, timeout=20))
@@ -236,182 +99,160 @@ jobs:
                   low = round(float((d.get("temperature_2m_min") or [0])[0]))
                   pop = (d.get("precipitation_probability_max") or [None])[0]
                   wind = c.get("wind_speed_10m")
-                  extra = []
+                  extras = []
                   if pop is not None:
-                      extra.append(f"降水概率{int(pop)}%")
+                      extras.append(f"降水概率{int(pop)}%")
                   if wind is not None:
-                      extra.append(f"风速{round(float(wind))}km/h")
-                  return f"杭州天气：{desc}，{low}℃～{high}℃" + ("，" + "，".join(extra) if extra else "")
-              except Exception:
-                  pass
-              try:
-                  obj = json.loads(http_get("https://wttr.in/Hangzhou?format=j1", timeout=20))
-                  today = obj.get("weather", [{}])[0]
-                  current = obj.get("current_condition", [{}])[0]
-                  low = today.get("mintempC")
-                  high = today.get("maxtempC")
-                  desc = (current.get("lang_zh") or [{}])[0].get("value") or current.get("weatherDesc", [{}])[0].get("value") or "天气待查"
-                  wind = current.get("windspeedKmph")
-                  return f"杭州天气：{desc}，{low}℃～{high}℃，风速{wind}km/h"
+                      extras.append(f"风速{round(float(wind))}km/h")
+                  advice = "建议带伞" if code in [51,53,55,61,63,65,80,81,82,95] or (pop is not None and int(pop) >= 50) else "适合正常出行"
+                  return f"杭州天气：{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extras) if extras else "")
               except Exception:
                   return "杭州天气：暂时获取失败"
 
-          def date_line(now):
-              return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
+          def calendar_items(now):
+              items = []
+              today = now.date()
+              for name, day in HOLIDAYS_2026:
+                  d = datetime.strptime(day, "%Y-%m-%d").date()
+                  diff = (d - today).days
+                  if 0 <= diff <= 30:
+                      items.append(f"日历：距离{name}还有{diff}天")
+                      break
+              if now.weekday() == 6:
+                  items.append("日历：今天是周日，明天工作日")
+              elif now.weekday() == 4:
+                  items.append("日历：今天是周五，周末前最后一个工作日")
+              return items
 
-          def candidate_text(candidates):
-              lines = []
-              for item in candidates[:260]:
-                  t = f" {item['time']}" if item["time"] else ""
-                  lines.append(f"{item['id']}. [{item['category']}] {item['title']}{t}")
-              return "\n".join(lines)
+          def football_items(now):
+              items = []
+              seen = set()
+              for label, league in FOOTBALL_LEAGUES:
+                  for delta in [-1, 0, 1]:
+                      day = (now + timedelta(days=delta)).strftime("%Y%m%d")
+                      url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard?dates={day}"
+                      try:
+                          obj = json.loads(http_get(url, timeout=15))
+                          for event in obj.get("events", [])[:5]:
+                              comps = event.get("competitions", [])
+                              if not comps:
+                                  continue
+                              comp = comps[0]
+                              teams = comp.get("competitors", [])
+                              if len(teams) < 2:
+                                  continue
+                              home = next((x for x in teams if x.get("homeAway") == "home"), teams[0])
+                              away = next((x for x in teams if x.get("homeAway") == "away"), teams[1])
+                              hn = home.get("team", {}).get("shortDisplayName") or home.get("team", {}).get("displayName")
+                              an = away.get("team", {}).get("shortDisplayName") or away.get("team", {}).get("displayName")
+                              hs = home.get("score")
+                              ass = away.get("score")
+                              status = comp.get("status", {}).get("type", {})
+                              state = status.get("state")
+                              detail = comp.get("status", {}).get("type", {}).get("shortDetail") or comp.get("status", {}).get("displayClock") or ""
+                              key = f"{label}{an}{hn}{day}"
+                              if key in seen:
+                                  continue
+                              seen.add(key)
+                              if state == "post" and hs is not None and ass is not None:
+                                  text = f"足球：{label} {an} {ass}-{hs} {hn}"
+                              elif state == "pre":
+                                  text = f"足球：{label} {an} vs {hn}，{detail}"
+                              else:
+                                  text = f"足球：{label} {an} {ass or ''}-{hs or ''} {hn}，{detail}"
+                              items.append(text)
+                              if len(items) >= 3:
+                                  return items
+                      except Exception:
+                          continue
+              return items
 
-          def siliconflow(messages, max_tokens=2200, temperature=0.15):
-              if not SILICONFLOW_API_KEY:
-                  raise RuntimeError("缺少 GitHub Secret：SILICONFLOW_API_KEY")
-              raw = post_json(
-                  SILICONFLOW_URL,
-                  {
-                      "model": SILICONFLOW_MODEL,
-                      "messages": messages,
-                      "temperature": temperature,
-                      "max_tokens": max_tokens,
-                  },
-                  headers={"Content-Type":"application/json", "Authorization": f"Bearer {SILICONFLOW_API_KEY}"},
-                  timeout=120,
-              )
-              obj = json.loads(raw)
-              if "choices" not in obj:
-                  raise RuntimeError("硅基流动返回异常：" + raw[:1000])
-              return obj["choices"][0]["message"]["content"].strip()
-
-          def parse_json_titles(text):
-              text = text.strip()
-              m = re.search(r"\[[\s\S]*\]", text)
-              if m:
-                  text = m.group(0)
+          def parse_pubdate(text):
               try:
-                  data = json.loads(text)
+                  dt = email.utils.parsedate_to_datetime(text)
+                  if dt.tzinfo is None:
+                      dt = dt.replace(tzinfo=timezone.utc)
+                  return dt.astimezone(BEIJING)
               except Exception:
-                  data = []
-                  for line in text.splitlines():
-                      line = clean_title(line)
-                      if line:
-                          data.append(line)
-              titles = []
-              for x in data:
-                  if isinstance(x, dict):
-                      x = x.get("title") or ""
-                  title = clean_title(x)
-                  if title:
-                      titles.append(title)
-              return titles
+                  return None
 
-          def normalize(titles, candidates, strict=True):
-              out = []
-              for title in titles:
-                  title = clean_title(title)
-                  if reject_title(title, strict=strict):
+          def tech_items(now):
+              items = []
+              for name, url in TECH_RSS:
+                  try:
+                      root = ET.fromstring(http_get(url, timeout=18))
+                      for item in root.findall(".//item")[:5]:
+                          title = clean(item.findtext("title"))
+                          pub = parse_pubdate(item.findtext("pubDate"))
+                          if pub and now - pub > timedelta(days=7):
+                              continue
+                          if not title or len(title) > 100:
+                              continue
+                          items.append(f"科技：{name} 官方更新：{title}")
+                          break
+                  except Exception:
                       continue
-                  if too_similar(title, out):
-                      continue
-                  out.append(title)
-                  if len(out) >= 15:
+                  if len(items) >= 2:
                       break
-              for item in candidates:
-                  if len(out) >= 15:
-                      break
-                  title = clean_title(item["title"])
-                  if reject_title(title, strict=False):
-                      continue
-                  if too_similar(title, out):
-                      continue
-                  out.append(title)
-              return out[:15]
+              return items
 
-          def generate_from_candidates(now, candidates):
-              prompt = "\n".join([
-                  "你是中文每日新闻编辑。请从候选新闻中选出并改写 8 到 10 条，适合年轻人早上快速阅读。",
-                  f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
-                  "只输出 JSON 数组，数组里是 8 到 10 个中文字符串。不要编号，不要解释。",
-                  "硬性规则：",
-                  "1. 优先最近24小时；不够时最多放宽到最近3天；如果质量不够，宁可少于10条，也不要硬凑。",
-                  "2. 类别均衡：国内民生、国际、科技数码、文娱生活、城市消费、重要商业都要有；财经/商业最多2条，热点标题最多2条。",
-                  "3. 每条必须是具体新闻：主体 + 动作 + 结果。不要泛泛趋势句。",
-                  "4. 不要股票股价、财报、银行宣传、会议活动稿、学术专刊、软文、标题党、足球新闻。",
-                  "5. 不要第几、多少、为何、藏着、出圈、私享会、微度假、继续推进、保持活跃、成为焦点这类标题。",
-                  "6. 如果候选标题质量一般，可以改写得更像新闻，但不能编造候选外的具体事实。",
-                  "候选新闻：",
-                  candidate_text(candidates),
-              ])
-              text = siliconflow([
-                  {"role": "system", "content": "你只输出 JSON 数组，8到10个中文新闻标题。"},
-                  {"role": "user", "content": prompt},
-              ])
-              print("AI原始返回：")
-              print(text)
-              return normalize(parse_json_titles(text), candidates, strict=True)[:10]
-
-          def generate_fill(now, existing, need):
-              if need <= 0:
-                  return []
-              prompt = "\n".join([
-                  f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
-                  f"请补充 {need} 条中文每日新闻标题，适合年轻人早上阅读。",
-                  "只输出 JSON 数组，不要编号，不要解释。",
-                  "尽量基于最近24小时到3天内公开热点；不要写无法确认的具体数字。",
-                  "不要股票股价、财报、银行宣传、会议稿、软文、标题党、足球新闻。",
-                  "每条必须是具体新闻，不要泛泛趋势句。",
-                  "已有标题，不能重复：",
-                  "\n".join("- " + x for x in existing),
-              ])
+          def epic_items(now):
+              url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?locale=zh-CN&country=CN&allowCountries=CN"
               try:
-                  text = siliconflow([
-                      {"role": "system", "content": "你只输出 JSON 数组，内容是干净的中文新闻标题。"},
-                      {"role": "user", "content": prompt},
-                  ], max_tokens=1200, temperature=0.2)
-                  return normalize(parse_json_titles(text), [], strict=True)[:need]
-              except Exception as e:
-                  print("AI补齐失败：", str(e)[:300])
-                  return []
+                  obj = json.loads(http_get(url, timeout=18))
+                  games = []
+                  for el in obj.get("data", {}).get("Catalog", {}).get("searchStore", {}).get("elements", []):
+                      title = clean(el.get("title"))
+                      promotions = el.get("promotions") or {}
+                      offers = promotions.get("promotionalOffers") or []
+                      upcoming = promotions.get("upcomingPromotionalOffers") or []
+                      if offers and title:
+                          games.append(title)
+                      if len(games) >= 2:
+                          break
+                  if games:
+                      return [f"游戏：Epic 本周免费游戏包括《{'》《'.join(games[:2])}》"]
+              except Exception:
+                  pass
+              return []
 
-          def format_content(now, weather, titles):
-              lines = ["每日新闻", date_line(now), weather]
-              for i, title in enumerate(titles[:10], 1):
-                  title = clean_title(title).rstrip("；;。")
-                  lines.append(f"{i}、{title}；")
+          def steam_items():
+              url = "https://store.steampowered.com/api/featuredcategories?cc=cn&l=schinese"
+              try:
+                  obj = json.loads(http_get(url, timeout=18))
+                  top = obj.get("top_sellers", {}).get("items", [])
+                  names = [clean(x.get("name")) for x in top if clean(x.get("name"))][:3]
+                  if names:
+                      return [f"游戏：Steam 热销榜前列包括《{'》《'.join(names[:3])}》"]
+              except Exception:
+                  pass
+              return []
+
+          def build_content():
+              now = datetime.now(BEIJING)
+              lines = ["每日轻量晨报", date_line(now), weather_line()]
+              items = []
+              items.extend(calendar_items(now))
+              items.extend(football_items(now))
+              items.extend(tech_items(now))
+              items.extend(epic_items(now))
+              items.extend(steam_items())
+              if not items:
+                  items.append("今日暂无稳定来源返回的高质量更新，先不硬凑内容")
+              for i, item in enumerate(items[:10], 1):
+                  lines.append(f"{i}、{item}；")
               return "\n".join(lines)
 
           def send_wecom(content):
               if not WECOM_WEBHOOK:
                   raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
-              raw = post_json(
-                  WECOM_WEBHOOK,
-                  {"msgtype":"markdown", "markdown":{"content":content}},
-                  headers={"Content-Type":"application/json; charset=utf-8"},
-                  timeout=30,
-              )
+              raw = post_json(WECOM_WEBHOOK, {"msgtype":"markdown","markdown":{"content":content}})
               print(raw)
               if json.loads(raw).get("errcode") != 0:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
-          now = datetime.now(BEIJING)
-          print("脚本版本：v18-quality-first")
-          weather = hangzhou_weather()
-          store = fetch_hot(fetch_rss(now))
-          candidates = sort_candidates(store["items"])
-          print(f"候选新闻数量：{len(candidates)}")
-          titles = generate_from_candidates(now, candidates)
-          print(f"严格筛选后数量：{len(titles)}")
-          if len(titles) < 8:
-              # First relax with real candidates instead of outputting only one item.
-              titles = normalize(titles + [x["title"] for x in candidates], candidates, strict=False)[:10]
-          if len(titles) < 6:
-              titles.extend(generate_fill(now, titles, 8 - len(titles)))
-              titles = normalize(titles, [], strict=False)[:10]
-          titles = titles[:10]
-          print(f"最终新闻数量：{len(titles)}")
-          content = format_content(now, weather, titles)
+          print("脚本版本：light-brief-v1")
+          content = build_content()
           print(content)
           send_wecom(content)
           PY
