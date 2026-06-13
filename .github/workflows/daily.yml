@@ -13,6 +13,8 @@ jobs:
       - name: Generate light brief and push to WeCom
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          SILICONFLOW_MODEL: Qwen/Qwen2.5-7B-Instruct
         run: |
           python - <<'PY'
           import email.utils
@@ -27,6 +29,9 @@ jobs:
 
           BEIJING = timezone(timedelta(hours=8))
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
+          SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY")
+          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL") or "Qwen/Qwen2.5-7B-Instruct"
+          SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
           WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
           CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
@@ -58,6 +63,24 @@ jobs:
               ("GitHub", "https://github.blog/feed/"),
           ]
 
+          TEAM_ZH = {
+              "Bosnia-Herz": "波黑",
+              "Bosnia and Herzegovina": "波黑",
+              "Canada": "加拿大",
+              "Paraguay": "巴拉圭",
+              "USA": "美国",
+              "United States": "美国",
+              "Switzerland": "瑞士",
+              "Qatar": "卡塔尔",
+              "England": "英格兰",
+              "Spain": "西班牙",
+              "France": "法国",
+              "Germany": "德国",
+              "Italy": "意大利",
+              "Brazil": "巴西",
+              "Argentina": "阿根廷",
+          }
+
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
                   "User-Agent": "Mozilla/5.0 Chrome/125 Safari/537.36",
@@ -67,22 +90,65 @@ jobs:
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
-          def post_json(url, payload, timeout=30):
+          def post_json(url, payload, timeout=30, headers=None):
               data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+              final_headers = {"Content-Type": "application/json; charset=utf-8"}
+              if headers:
+                  final_headers.update(headers)
               req = urllib.request.Request(
                   url,
                   data=data,
-                  headers={"Content-Type": "application/json; charset=utf-8"},
+                  headers=final_headers,
                   method="POST",
               )
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
+
+          def siliconflow_translate(lines):
+              if not SILICONFLOW_API_KEY or not lines:
+                  return lines
+              payload = {
+                  "model": SILICONFLOW_MODEL,
+                  "messages": [
+                      {"role": "system", "content": "你是中文晨报编辑。只输出 JSON 数组，逐条把输入改写成自然中文，保留事实、比分、产品名，不要添加新事实。"},
+                      {"role": "user", "content": json.dumps(lines, ensure_ascii=False)},
+                  ],
+                  "temperature": 0.1,
+                  "max_tokens": 1200,
+              }
+              try:
+                  raw = post_json(
+                      SILICONFLOW_URL,
+                      payload,
+                      timeout=90,
+                      headers={"Authorization": f"Bearer {SILICONFLOW_API_KEY}"},
+                  )
+                  obj = json.loads(raw)
+                  text = obj["choices"][0]["message"]["content"].strip()
+                  m = re.search(r"\[[\s\S]*\]", text)
+                  data = json.loads(m.group(0) if m else text)
+                  if isinstance(data, list) and len(data) == len(lines):
+                      return [clean(x) for x in data]
+              except Exception as e:
+                  print("中文化失败：", str(e)[:300])
+              return lines
 
           def clean(text):
               text = html.unescape(str(text or ""))
               text = re.sub(r"<[^>]+>", "", text)
               text = re.sub(r"\s+", " ", text).strip()
               return text.strip(" ；;，,。")
+
+          def zh_text(text):
+              text = clean(text)
+              for en, zh in TEAM_ZH.items():
+                  text = text.replace(en, zh)
+              text = text.replace("Scheduled", "待开赛")
+              text = text.replace("Final", "完场")
+              text = text.replace("Halftime", "中场")
+              text = text.replace("Postponed", "延期")
+              text = text.replace("vs", "vs")
+              return text
 
           def date_line(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
@@ -143,13 +209,13 @@ jobs:
                                   continue
                               home = next((x for x in teams if x.get("homeAway") == "home"), teams[0])
                               away = next((x for x in teams if x.get("homeAway") == "away"), teams[1])
-                              hn = home.get("team", {}).get("shortDisplayName") or home.get("team", {}).get("displayName")
-                              an = away.get("team", {}).get("shortDisplayName") or away.get("team", {}).get("displayName")
+                              hn = zh_text(home.get("team", {}).get("shortDisplayName") or home.get("team", {}).get("displayName"))
+                              an = zh_text(away.get("team", {}).get("shortDisplayName") or away.get("team", {}).get("displayName"))
                               hs = home.get("score")
                               ass = away.get("score")
                               status = comp.get("status", {}).get("type", {})
                               state = status.get("state")
-                              detail = comp.get("status", {}).get("type", {}).get("shortDetail") or comp.get("status", {}).get("displayClock") or ""
+                              detail = zh_text(comp.get("status", {}).get("type", {}).get("shortDetail") or comp.get("status", {}).get("displayClock") or "")
                               key = f"{label}{an}{hn}{day}"
                               if key in seen:
                                   continue
@@ -162,6 +228,42 @@ jobs:
                                   text = f"足球：{label} {an} {ass or ''}-{hs or ''} {hn}，{detail}"
                               items.append(text)
                               if len(items) >= 3:
+                                  return items
+                      except Exception:
+                          continue
+              return items
+
+          def local_life_items(now):
+              queries = [
+                  "杭州 本地 交通 出行 提醒 最新",
+                  "杭州 展览 演出 音乐节 活动 最新",
+                  "杭州 文旅 消费 地铁 公交 最新",
+              ]
+              bad = ["房价", "楼市", "招聘", "广告", "论坛", "研讨会", "股票", "银行", "发布会", "主题党日"]
+              items = []
+              seen = set()
+              for query in queries:
+                  urls = [
+                      "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q": query + " when:3d", "hl":"zh-CN", "gl":"CN", "ceid":"CN:zh-Hans"}),
+                      "https://www.bing.com/news/search?" + urllib.parse.urlencode({"q": query, "format":"rss", "setlang":"zh-CN", "cc":"cn"}),
+                  ]
+                  for url in urls:
+                      try:
+                          root = ET.fromstring(http_get(url, timeout=18))
+                          for item in root.findall(".//item")[:8]:
+                              title = clean(item.findtext("title"))
+                              pub = parse_pubdate(item.findtext("pubDate"))
+                              if pub and now - pub > timedelta(days=3):
+                                  continue
+                              if not title or any(x in title for x in bad):
+                                  continue
+                              title = re.sub(r"\s+-\s+[^-]+$", "", title)
+                              key = re.sub(r"\W+", "", title.lower())[:60]
+                              if key in seen:
+                                  continue
+                              seen.add(key)
+                              items.append(f"杭州：{title}")
+                              if len(items) >= 2:
                                   return items
                       except Exception:
                           continue
@@ -234,9 +336,11 @@ jobs:
               items = []
               items.extend(calendar_items(now))
               items.extend(football_items(now))
+              items.extend(local_life_items(now))
               items.extend(tech_items(now))
               items.extend(epic_items(now))
               items.extend(steam_items())
+              items = siliconflow_translate(items)
               if not items:
                   items.append("今日暂无稳定来源返回的高质量更新，先不硬凑内容")
               for i, item in enumerate(items[:10], 1):
@@ -251,7 +355,7 @@ jobs:
               if json.loads(raw).get("errcode") != 0:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
-          print("脚本版本：light-brief-v1")
+          print("脚本版本：light-brief-v2")
           content = build_content()
           print(content)
           send_wecom(content)
