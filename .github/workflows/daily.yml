@@ -24,6 +24,7 @@ jobs:
           import urllib.parse
           import urllib.request
           import xml.etree.ElementTree as ET
+          from difflib import SequenceMatcher
           from datetime import datetime, timedelta, timezone
 
           BEIJING = timezone(timedelta(hours=8))
@@ -65,6 +66,8 @@ jobs:
               "引热议", "冲上热搜", "摘要", "头版头条", "内容精华", "黄金赛道", "大牛股", "商业消费",
               "年中调查", "大会在", "论坛", "专栏", "观察者网", "发布战略", "生态大会", "破局", "再启新篇",
               "美好生活大调查", "全民情绪消费", "产业链应用链",
+              "财报", "一季度", "Q1", "盘后", "分析师", "预测", "证券报", "投行", "路演", "高管", "减持",
+              "套现", "股东", "营收", "利润", "电话会议", "影响力100强", "重点行业10强", "宣布调价",
           ]
           VAGUE_WORDS = [
               "新趋势", "新动态", "新平台", "新视角", "新策略", "新风尚", "新突破", "新挑战", "反思", "布局",
@@ -74,7 +77,7 @@ jobs:
           CATEGORY_QUOTA = {
               "国内民生": 3,
               "国际": 3,
-              "财经商业": 3,
+              "财经商业": 2,
               "科技数码": 3,
               "文娱生活": 2,
               "杭州本地": 1,
@@ -116,8 +119,28 @@ jobs:
               text = re.sub(r"^\s*[A-Za-z0-9]+[\.\)、\-\s]*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
               text = re.sub(r"[_｜|].*?(新闻|资讯|官网|客户端).*$", "", text)
+              text = re.sub(r"[-_｜|].*?(ITBear|商业消费|东方财富|证券|股吧|财联社).*$", "", text, flags=re.I)
               text = re.sub(r"\s+", " ", text).strip()
               return text.strip(" ；;，,。\"'")
+
+          def norm_for_dup(text):
+              text = clean_title(text)
+              text = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", text).lower()
+              return text
+
+          def too_similar(title, existing_titles):
+              n = norm_for_dup(title)
+              if not n:
+                  return True
+              for old in existing_titles:
+                  o = norm_for_dup(old)
+                  if not o:
+                      continue
+                  if n in o or o in n:
+                      return True
+                  if SequenceMatcher(None, n, o).ratio() >= 0.72:
+                      return True
+              return False
 
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
@@ -137,7 +160,9 @@ jobs:
                   return
               if len(title) < 10 or len(title) > 120:
                   return
-              if any(word in title for word in BAD_WORDS):
+              if any(word in title for word in BAD_WORDS + VAGUE_WORDS):
+                  return
+              if too_similar(title, [x["title"] for x in store["items"]]):
                   return
               key = re.sub(r"\W+", "", title.lower())[:80]
               if key in store["_seen"]:
@@ -246,6 +271,10 @@ jobs:
                   return False
               if any(word in title for word in BAD_WORDS + VAGUE_WORDS):
                   return False
+              if re.search(r"(将于\d{2}月\d{2}日|发布\d{4}年|第[一二三四]季度|同比增长|营业收入|净利润|每股|目标价)", title):
+                  return False
+              if title.count("：") >= 2 or title.count(":") >= 2:
+                  return False
               if re.match(r"^(新闻|标题|安全|外交|国际|财经|科技|文娱|生活)[:：；;]", title):
                   return False
               if "？" in title or "?" in title:
@@ -308,7 +337,7 @@ jobs:
                   if category_count.get(category, 0) >= CATEGORY_QUOTA.get(category, 2):
                       return False
                   key = re.sub(r"\W+", "", title.lower())[:60]
-                  if key in seen:
+                  if key in seen or too_similar(title, cleaned):
                       return False
                   seen.add(key)
                   category_count[category] = category_count.get(category, 0) + 1
@@ -356,6 +385,10 @@ jobs:
                       continue
                   if any(word in title for word in ["每日一言", "历史上的今天", "彩票", "星座", "广告", "扫码", "关注公众号"]):
                       continue
+                  if any(word in title for word in BAD_WORDS + VAGUE_WORDS):
+                      continue
+                  if too_similar(title, cleaned):
+                      continue
                   key = re.sub(r"\W+", "", title.lower())[:60]
                   if key in seen:
                       continue
@@ -371,14 +404,15 @@ jobs:
                   f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
                   "只输出 JSON 数组，数组里正好 15 个对象。每个对象格式为 {\"id\": 123, \"title\": \"改写后的中文标题\"}。不要输出日期、天气、编号、解释、Markdown，也不要把整个 JSON 对象写进 title。",
                   "选择规则：",
-                  "1. 类别要均衡：国内民生、国际、财经商业、科技数码、文娱生活、城市消费都要覆盖；单一领域不超过 4 条。",
+                  "1. 类别要均衡：国内民生、国际、科技数码、文娱生活、城市消费、重要商业都要覆盖；财经商业最多 2 条。",
                   "2. 每条一眼看懂，必须包含具体主体、动作、结果。禁止写栏目式、评论式、趋势式空标题。",
                   "3. 不要足球新闻，除非它是当天全网级重大事件。",
                   "4. 不要低信息标题：为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜。",
-                  "5. 不要来源、链接、日期、评论数、括号媒体名。",
+                  "5. 不要来源、链接、日期、评论数、括号媒体名；不要财报、股市、证券研报、投行路演、高管减持、公司电话会议。",
                   "6. 不要把开头写成“新闻；”。不要使用 A/B/C 或 E/F/G 编号。",
                   "7. 必须选择候选新闻里的真实编号，不允许凭空编新闻。优先选择最近 5 天的新消息，明显过时的不要选。",
-                  "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足，就不要选。",
+                  "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足、像广告软文或资本市场公告，就不要选。",
+                  "9. 优先选择年轻人会关心的内容：公共政策、城市生活、科技产品、AI/数码、出行消费、电影音乐演出、国际大事。",
                   "候选新闻：",
                   build_candidate_text(candidates),
               ])
