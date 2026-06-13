@@ -29,11 +29,11 @@ jobs:
           TARGET_TOTAL = 15
 
           WEATHER_CODES = {
-              0: "晴", 1: "大部晴朗", 2: "局部多云", 3: "阴",
-              45: "雾", 48: "雾凇", 51: "小毛毛雨", 53: "毛毛雨",
-              55: "较强毛毛雨", 61: "小雨", 63: "中雨", 65: "大雨",
-              71: "小雪", 73: "中雪", 75: "大雪", 80: "阵雨",
-              81: "较强阵雨", 82: "强阵雨", 95: "雷阵雨",
+              0: "晴", 1: "大部晴朗", 2: "局部多云", 3: "阴", 45: "雾",
+              51: "小毛毛雨", 53: "毛毛雨", 55: "较强毛毛雨",
+              61: "小雨", 63: "中雨", 65: "大雨", 71: "小雪",
+              73: "中雪", 75: "大雪", 80: "阵雨", 81: "较强阵雨",
+              82: "强阵雨", 95: "雷阵雨",
           }
           WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
           CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
@@ -42,28 +42,41 @@ jobs:
                      "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
 
           TOPICS = [
-              ("international", 3, "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 热点 外交 冲突"),
-              ("china_society", 3, "中国 社会 民生 教育 医疗 交通 天气 消费 新规 热点"),
-              ("business", 3, "财经 商业 公司 股市 房地产 新能源 汽车 消费 市场"),
-              ("tech", 3, "科技 AI 人工智能 手机 芯片 机器人 互联网 游戏 新能源"),
-              ("sports_ent", 3, "足球 体育 世界杯 欧冠 中超 国足 电影 音乐 文娱 票房"),
+              ("international", 3, "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 最新 发生 宣布"),
+              ("china_society", 3, "中国 国内 社会 民生 教育 医疗 交通 新规 警方 法院 最新"),
+              ("business", 3, "财经 商业 公司 股市 汽车 新能源 消费 市场 宣布 发布"),
+              ("tech", 3, "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线 宣布"),
+              ("sports_ent", 3, "足球 体育 世界杯 欧冠 中超 国足 电影 音乐 票房 比赛"),
           ]
 
           CATEGORY_WORDS = {
-              "international": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "国际", "总统", "政府", "制裁", "冲突", "停火"],
+              "international": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "总统", "政府", "制裁", "冲突", "停火", "访问"],
               "china_society": ["中国", "国内", "杭州", "北京", "上海", "广州", "教育", "高考", "医疗", "医保", "交通", "铁路", "天气", "消费", "新规", "警方", "法院"],
               "business": ["财经", "股市", "A股", "港股", "美元", "人民币", "房价", "楼市", "公司", "上市", "汽车", "新能源", "特斯拉", "比亚迪", "市场"],
               "tech": ["科技", "AI", "人工智能", "大模型", "芯片", "手机", "华为", "苹果", "小米", "英伟达", "机器人", "互联网", "游戏"],
               "sports_ent": ["足球", "世界杯", "欧冠", "英超", "西甲", "中超", "国足", "转会", "电影", "票房", "音乐", "演唱会", "文娱"],
           }
 
-          BAD_WORDS = [
+          HARD_BAD = [
               "学习贯彻", "重要讲话", "会议指出", "会议强调", "高质量发展", "现代化建设",
               "扎实推进", "谱写新篇", "开创新局面", "凝心聚力", "工作会议", "座谈会",
               "调研时强调", "主题教育", "党建", "党纪", "公报", "白皮书", "每日一言",
               "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤", "一图读懂",
               "一文读懂", "背后原因", "原因找到了", "网友炸锅", "冲上热搜", "引热议",
               "什么情况", "怎么回事", "为何", "为什么", "你怎么看", "速看", "注意了",
+              "分析人士", "报告：", "报告称", "深度研报", "研报：", "透视", "年终报道",
+              "市场介绍", "介绍", "一场意志", "制度的较量", "操盘必读", "财经媒体报道汇总",
+              "影响股市利好或利空", "盘点", "观察", "评论：", "社论：", "专访：",
+          ]
+
+          FACT_ACTIONS = [
+              "宣布", "发布", "确认", "通过", "批准", "实施", "生效", "启动", "恢复",
+              "取消", "禁止", "允许", "推出", "上线", "下架", "召回", "调查", "逮捕",
+              "起诉", "判决", "处罚", "罚款", "死亡", "受伤", "失踪", "救援", "关闭",
+              "开放", "上涨", "下跌", "增长", "下降", "突破", "创下", "超过", "降至",
+              "涨至", "签约", "加盟", "续约", "裁员", "收购", "出售", "上市", "停产",
+              "量产", "交付", "发射", "坠毁", "击败", "战胜", "逆转", "夺冠", "晋级",
+              "出局", "破门", "双响", "助攻", "开售", "开通", "停运", "延误",
           ]
 
           def http_get(url, timeout=25):
@@ -83,28 +96,25 @@ jobs:
               text = re.sub(r"<[^>]+>", "", text)
               text = re.sub(r"^\s*\d+[、.．]\s*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
+              text = re.sub(r"_\d{4}年\d{1,2}月\d{1,2}日_.*$", "", text)
               text = re.sub(r"\s+", " ", text).strip()
               return text.strip("；;，,。 ")
 
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
 
-          def is_self_explanatory(text):
-              if not text or len(text) < 14 or len(text) > 115 or not has_chinese(text):
+          def is_factual_title(text):
+              if not text or len(text) < 14 or len(text) > 105 or not has_chinese(text):
                   return False
-              if any(x in text for x in BAD_WORDS):
+              if any(x in text for x in HARD_BAD):
                   return False
-              # 标题最好包含明确主体和明确动作/结果，避免纯悬念标题。
-              action_words = [
-                  "发布", "宣布", "确认", "通过", "实施", "上涨", "下跌", "增长", "下降",
-                  "禁止", "允许", "恢复", "取消", "推出", "上线", "下架", "召回", "调查",
-                  "逮捕", "起诉", "判决", "死亡", "受伤", "夺冠", "晋级", "击败", "战胜",
-                  "签约", "加盟", "续约", "裁员", "涨价", "降价", "破", "超", "将",
-              ]
+              if re.search(r"\d{4}年\d{1,2}月\d{1,2}日", text):
+                  return False
               has_number = re.search(r"\d", text) is not None
-              has_action = any(x in text for x in action_words)
-              has_colon = "：" in text or ":" in text
-              return has_action or has_number or has_colon
+              has_action = any(x in text for x in FACT_ACTIONS)
+              has_source_fact = re.search(r"^[\u4e00-\u9fffA-Za-z]{1,8}[:：].*(宣布|确认|将|已|因|对|向|在|为|以|获|被|成)", text) is not None
+              has_match_score = re.search(r"\d+\s*[-:：比]\s*\d+", text) is not None
+              return has_match_score or has_source_fact or (has_action and (has_number or "：" in text or ":" in text)) or (has_action and len(text) >= 20)
 
           def rss_url(query):
               params = {"q": query, "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
@@ -117,11 +127,12 @@ jobs:
                       score += 5
               if re.search(r"\d", text):
                   score += 2
-              if "：" in text or ":" in text:
-                  score += 1
-              # AI 不再过度加权，防止全是 AI 新闻。
+              if any(x in text for x in FACT_ACTIONS):
+                  score += 5
+              if re.search(r"\d+\s*[-:：比]\s*\d+", text):
+                  score += 8
               if category == "tech" and any(x in text for x in ["AI", "人工智能", "OpenAI", "大模型"]):
-                  score += 2
+                  score += 1
               return score
 
           def fetch_category(category, query):
@@ -129,9 +140,9 @@ jobs:
               try:
                   raw = http_get(rss_url(query))
                   root = ET.fromstring(raw)
-                  for item in root.findall(".//item")[:35]:
+                  for item in root.findall(".//item")[:45]:
                       title = clean_text(item.findtext("title"))
-                      if is_self_explanatory(title):
+                      if is_factual_title(title):
                           score = score_for_category(title, category)
                           if score > 0:
                               out.append((score, title))
@@ -155,11 +166,11 @@ jobs:
               pools = []
               for category, quota, query in TOPICS:
                   pool = dedupe(fetch_category(category, query))
-                  pools.append((category, quota, pool))
+                  pools.append((quota, pool))
                   picked.extend(pool[:quota])
               picked = dedupe(picked)
               if len(picked) < TARGET_TOTAL:
-                  for category, quota, pool in pools:
+                  for quota, pool in pools:
                       for item in pool[quota:]:
                           if item not in picked:
                               picked.append(item)
