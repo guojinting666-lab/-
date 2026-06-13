@@ -331,11 +331,11 @@ jobs:
 
           def generate_from_candidates(now, candidates):
               prompt = "\n".join([
-                  "你是中文每日新闻编辑。请从候选新闻中选出并改写 15 条，适合年轻人早上快速阅读。",
+                  "你是中文每日新闻编辑。请从候选新闻中选出并改写 8 到 10 条，适合年轻人早上快速阅读。",
                   f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
-                  "只输出 JSON 数组，数组里正好 15 个中文字符串。不要编号，不要解释。",
+                  "只输出 JSON 数组，数组里是 8 到 10 个中文字符串。不要编号，不要解释。",
                   "硬性规则：",
-                  "1. 优先最近24小时；不够时最多放宽到最近3天。",
+                  "1. 优先最近24小时；不够时最多放宽到最近3天；如果质量不够，宁可少于10条，也不要硬凑。",
                   "2. 类别均衡：国内民生、国际、科技数码、文娱生活、城市消费、重要商业都要有；财经/商业最多2条，热点标题最多2条。",
                   "3. 每条必须是具体新闻：主体 + 动作 + 结果。不要泛泛趋势句。",
                   "4. 不要股票股价、财报、银行宣传、会议活动稿、学术专刊、软文、标题党、足球新闻。",
@@ -345,12 +345,12 @@ jobs:
                   candidate_text(candidates),
               ])
               text = siliconflow([
-                  {"role": "system", "content": "你只输出 JSON 数组，正好 15 个中文新闻标题。"},
+                  {"role": "system", "content": "你只输出 JSON 数组，8到10个中文新闻标题。"},
                   {"role": "user", "content": prompt},
               ])
               print("AI原始返回：")
               print(text)
-              return normalize(parse_json_titles(text), candidates, strict=True)
+              return normalize(parse_json_titles(text), candidates, strict=True)[:10]
 
           def generate_fill(now, existing, need):
               if need <= 0:
@@ -377,7 +377,7 @@ jobs:
 
           def format_content(now, weather, titles):
               lines = ["每日新闻", date_line(now), weather]
-              for i, title in enumerate(titles[:15], 1):
+              for i, title in enumerate(titles[:10], 1):
                   title = clean_title(title).rstrip("；;。")
                   lines.append(f"{i}、{title}；")
               return "\n".join(lines)
@@ -396,43 +396,20 @@ jobs:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
           now = datetime.now(BEIJING)
-          print("脚本版本：v17")
+          print("脚本版本：v18-quality-first")
           weather = hangzhou_weather()
           store = fetch_hot(fetch_rss(now))
           candidates = sort_candidates(store["items"])
           print(f"候选新闻数量：{len(candidates)}")
           titles = generate_from_candidates(now, candidates)
           print(f"严格筛选后数量：{len(titles)}")
-          if len(titles) < 15:
+          if len(titles) < 8:
               # First relax with real candidates instead of outputting only one item.
-              titles = normalize(titles + [x["title"] for x in candidates], candidates, strict=False)
-          if len(titles) < 15:
-              titles.extend(generate_fill(now, titles, 15 - len(titles)))
-              titles = normalize(titles, [], strict=False)
-          # Absolute last resort: keep format stable, but this should rarely be used.
-          fallback = [
-              "G7峰会前夕，多国围绕中东局势、能源安全和全球贸易释放政策信号",
-              "中东紧张局势升温，多国提醒公民谨慎前往相关地区",
-              "多地更新强降雨和高温预警，出行、通勤和户外活动需关注临近天气",
-              "AI应用继续进入办公和手机场景，多家科技公司加快端侧模型落地",
-              "暑期档临近，电影、演唱会和城市文旅活动带动线下消费升温",
-              "即时零售平台继续扩展到店、到家和会员服务，城市生活服务竞争加剧",
-              "新能源汽车补能服务继续升级，充电、餐饮和休息场景加速融合",
-              "高校毕业季带动招聘、租房和城市公共服务需求上升",
-              "跨境购物平台继续优化物流和售后，海淘服务从线上延伸到线下场景",
-              "智能硬件新品密集更新，手机、电脑和可穿戴设备成为AI入口竞争焦点",
-              "多地商圈改造存量空间，餐饮、运动和展演体验成为吸引年轻人的重点",
-              "国际能源市场关注中东风险，航运、油价和供应链波动仍受关注",
-              "国内城市继续优化公共交通和文旅服务，夜间消费和短途旅行热度上升",
-              "平台企业加码本地生活服务，配送效率和线下履约体验成为竞争重点",
-              "暑期出行需求上升，铁路、航班和景区服务进入高峰保障阶段",
-          ]
-          for title in fallback:
-              if len(titles) >= 15:
-                  break
-              if not too_similar(title, titles):
-                  titles.append(title)
-          titles = titles[:15]
+              titles = normalize(titles + [x["title"] for x in candidates], candidates, strict=False)[:10]
+          if len(titles) < 6:
+              titles.extend(generate_fill(now, titles, 8 - len(titles)))
+              titles = normalize(titles, [], strict=False)[:10]
+          titles = titles[:10]
           print(f"最终新闻数量：{len(titles)}")
           content = format_content(now, weather, titles)
           print(content)
