@@ -15,7 +15,6 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           python - <<'PY'
-          import email.utils
           import html
           import json
           import os
@@ -42,53 +41,61 @@ jobs:
                      "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日",
                      "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
 
-          TOPICS = [
-              ("football", 2, "足球 世界杯 欧冠 英超 西甲 中超 国足 转会 比分 最新"),
-              ("international", 3, "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 最新 宣布"),
-              ("china_society", 3, "中国 国内 社会 民生 教育 医疗 交通 新规 警方 法院 最新"),
-              ("business", 2, "财经 商业 公司 股市 汽车 新能源 消费 市场 宣布 发布"),
-              ("tech", 2, "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线 宣布"),
-              ("culture_life", 3, "电影 音乐 文娱 票房 旅游 年轻人 消费 生活 教育 就业 最新"),
+          HOT_ENDPOINTS = [
+              ("综合", "https://api-hot.imsyy.top/baidu"),
+              ("综合", "https://api-hot.imsyy.top/toutiao"),
+              ("综合", "https://api-hot.imsyy.top/weibo"),
+              ("综合", "https://api-hot.imsyy.top/zhihu"),
+              ("国际", "https://api-hot.imsyy.top/thepaper"),
+              ("科技", "https://api-hot.imsyy.top/36kr"),
+              ("科技", "https://api-hot.imsyy.top/ithome"),
+              ("文娱", "https://api-hot.imsyy.top/bilibili"),
+              ("文娱", "https://api-hot.imsyy.top/douyin"),
+              ("足球", "https://api-hot.imsyy.top/hupu"),
+              ("足球", "https://api-hot.imsyy.top/dongqiudi"),
+          ]
+
+          RSS_FALLBACKS = [
+              ("足球", "足球 世界杯 欧冠 英超 西甲 中超 国足 转会 比分"),
+              ("国际", "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 最新"),
+              ("国内", "中国 国内 社会 民生 教育 医疗 交通 新规 最新"),
+              ("商业", "财经 商业 公司 股市 汽车 新能源 消费 市场 最新"),
+              ("科技", "科技 手机 芯片 机器人 互联网 游戏 AI 最新"),
+              ("文娱", "电影 音乐 文娱 票房 旅游 年轻人 消费 最新"),
           ]
 
           CATEGORY_WORDS = {
-              "football": ["足球", "世界杯", "欧冠", "英超", "西甲", "意甲", "德甲", "中超", "国足", "转会", "进球", "比分", "击败", "战胜"],
-              "international": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "总统", "政府", "制裁", "冲突", "停火", "访问"],
-              "china_society": ["中国", "国内", "杭州", "北京", "上海", "广州", "教育", "高考", "医疗", "医保", "交通", "铁路", "天气", "消费", "新规", "警方", "法院"],
-              "business": ["财经", "股市", "A股", "港股", "美元", "人民币", "房价", "楼市", "公司", "上市", "汽车", "新能源", "特斯拉", "比亚迪", "市场"],
-              "tech": ["科技", "AI", "人工智能", "大模型", "芯片", "手机", "华为", "苹果", "小米", "英伟达", "机器人", "互联网", "游戏"],
-              "culture_life": ["电影", "票房", "音乐", "演唱会", "文娱", "旅游", "消费", "年轻人", "就业", "教育", "游戏", "社交"],
+              "足球": ["足球", "世界杯", "欧冠", "英超", "西甲", "意甲", "德甲", "中超", "国足", "转会", "进球", "比分", "击败", "战胜"],
+              "国际": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "总统", "政府", "制裁", "冲突", "停火", "访问"],
+              "国内": ["中国", "国内", "杭州", "北京", "上海", "广州", "教育", "高考", "医疗", "医保", "交通", "铁路", "天气", "消费", "新规", "警方", "法院"],
+              "商业": ["财经", "股市", "A股", "港股", "美元", "人民币", "房价", "楼市", "公司", "上市", "汽车", "新能源", "特斯拉", "比亚迪", "市场"],
+              "科技": ["科技", "AI", "人工智能", "大模型", "芯片", "手机", "华为", "苹果", "小米", "英伟达", "机器人", "互联网", "游戏"],
+              "文娱": ["电影", "票房", "音乐", "演唱会", "文娱", "旅游", "消费", "年轻人", "就业", "教育", "游戏", "社交"],
           }
 
-          HARD_BAD = [
+          BAD_WORDS = [
               "学习贯彻", "重要讲话", "会议指出", "会议强调", "高质量发展", "现代化建设",
-              "扎实推进", "谱写新篇", "开创新局面", "凝心聚力", "工作会议", "座谈会",
-              "调研时强调", "主题教育", "党建", "党纪", "公报", "白皮书", "每日一言",
-              "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤", "一图读懂",
-              "一文读懂", "背后原因", "原因找到了", "网友炸锅", "冲上热搜", "引热议",
-              "什么情况", "怎么回事", "为何", "为什么", "你怎么看", "速看", "注意了",
-              "分析人士", "报告：", "报告称", "深度研报", "研报：", "透视", "年终报道",
-              "市场介绍", "操盘必读", "财经媒体报道汇总", "影响股市利好或利空",
-              "盘点", "观察", "评论：", "社论：", "专访：",
+              "工作会议", "座谈会", "主题教育", "党建", "党纪", "每日一言", "历史上的今天",
+              "今日油价", "彩票", "星座", "养生", "鸡汤", "一图读懂", "一文读懂",
+              "背后原因", "原因找到了", "网友炸锅", "冲上热搜", "引热议", "什么情况",
+              "怎么回事", "为何", "为什么", "你怎么看", "速看", "注意了", "分析人士",
+              "深度研报", "研报：", "透视", "年终报道", "市场介绍", "操盘必读",
+              "财经媒体报道汇总", "盘点", "观察", "评论：", "社论：", "专访：",
           ]
 
-          FACT_ACTIONS = [
+          FACT_WORDS = [
               "宣布", "发布", "确认", "通过", "批准", "实施", "生效", "启动", "恢复",
               "取消", "禁止", "允许", "推出", "上线", "下架", "召回", "调查", "逮捕",
-              "起诉", "判决", "处罚", "罚款", "死亡", "受伤", "失踪", "救援", "关闭",
-              "开放", "上涨", "下跌", "增长", "下降", "突破", "创下", "超过", "降至",
-              "涨至", "签约", "加盟", "续约", "裁员", "收购", "出售", "上市", "停产",
-              "量产", "交付", "发射", "坠毁", "击败", "战胜", "逆转", "夺冠", "晋级",
-              "出局", "破门", "双响", "助攻", "开售", "开通", "停运", "延误",
+              "起诉", "判决", "处罚", "罚款", "死亡", "受伤", "救援", "关闭", "开放",
+              "上涨", "下跌", "增长", "下降", "突破", "创下", "超过", "降至", "涨至",
+              "签约", "加盟", "续约", "裁员", "收购", "出售", "上市", "停产", "量产",
+              "交付", "发射", "坠毁", "击败", "战胜", "逆转", "夺冠", "晋级", "出局",
+              "破门", "双响", "助攻", "开售", "开通", "停运", "延误", "回应", "辟谣",
           ]
 
-          DAILY_NEWS_APIS = [
-              "https://api.vvhan.com/api/60s?type=json",
-              "https://api.pearktrue.cn/api/60s/",
-              "https://api.03c3.cn/api/zb",
-          ]
+          QUOTAS = {"足球": 2, "国际": 3, "国内": 3, "商业": 2, "科技": 2, "文娱": 3}
 
-          def http_get(url, timeout=25):
+          def http_get(url, timeout=20):
               req = urllib.request.Request(
                   url,
                   headers={
@@ -105,173 +112,122 @@ jobs:
               text = re.sub(r"<[^>]+>", "", text)
               text = re.sub(r"^\s*\d+[、.．]\s*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
-              text = re.sub(r"_\d{4}年\d{1,2}月\d{1,2}日_.*$", "", text)
               text = re.sub(r"\s+", " ", text).strip()
               return text.strip("；;，,。 ")
-
-          def parse_pubdate(text):
-              if not text:
-                  return None
-              try:
-                  dt = email.utils.parsedate_to_datetime(text)
-                  if dt.tzinfo is None:
-                      dt = dt.replace(tzinfo=timezone.utc)
-                  return dt.astimezone(BEIJING)
-              except Exception:
-                  return None
 
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
 
-          def is_within_24h(pub_dt, now):
-              if pub_dt is None:
+          def useful_title(text):
+              if not text or len(text) < 10 or len(text) > 110 or not has_chinese(text):
                   return False
-              return now - timedelta(hours=24) <= pub_dt <= now + timedelta(minutes=10)
-
-          def is_factual_title(text, strict=True):
-              if not text or len(text) < 12 or len(text) > 115 or not has_chinese(text):
+              if any(x in text for x in BAD_WORDS):
                   return False
-              if any(x in text for x in HARD_BAD):
+              if re.fullmatch(r"[\d\s:：/-]+", text):
                   return False
-              if re.search(r"\d{4}年\d{1,2}月\d{1,2}日", text):
-                  return False
-              has_number = re.search(r"\d", text) is not None
-              has_action = any(x in text for x in FACT_ACTIONS)
-              has_source_fact = re.search(r"^[\u4e00-\u9fffA-Za-z]{1,8}[:：].*(宣布|确认|将|已|因|对|向|在|为|以|获|被|成)", text) is not None
-              has_match_score = re.search(r"\d+\s*[-:：比]\s*\d+", text) is not None
-              if has_match_score or has_source_fact:
-                  return True
-              if strict:
-                  return (has_action and (has_number or "：" in text or ":" in text)) or (has_action and len(text) >= 20)
-              return has_action or has_number or ("：" in text or ":" in text)
-
-          def rss_url(query, use_when=True):
-              q = query + (" when:1d" if use_when else "")
-              params = {"q": q, "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
-              return "https://news.google.com/rss/search?" + urllib.parse.urlencode(params)
-
-          def score_for_category(text, category):
-              score = 0
-              for word in CATEGORY_WORDS[category]:
-                  if word in text:
-                      score += 5
-              if re.search(r"\d", text):
-                  score += 2
-              if any(x in text for x in FACT_ACTIONS):
-                  score += 5
+              # 热榜标题不一定完美，但至少要有数字、冒号、明确动作词或比赛比分之一。
               if re.search(r"\d+\s*[-:：比]\s*\d+", text):
-                  score += 8
-              return score
+                  return True
+              if "：" in text or ":" in text:
+                  return True
+              if re.search(r"\d", text):
+                  return True
+              if any(x in text for x in FACT_WORDS):
+                  return True
+              return False
 
-          def fetch_category(category, query, now):
-              out = []
-              for use_when in [True, False]:
-                  try:
-                      raw = http_get(rss_url(query, use_when=use_when))
-                      root = ET.fromstring(raw)
-                      for item in root.findall(".//item")[:60]:
-                          title = clean_text(item.findtext("title"))
-                          pub_dt = parse_pubdate(item.findtext("pubDate"))
-                          # 正常情况严格24小时；如果Google没有返回时间，只在兜底阶段接受。
-                          if pub_dt is not None and not is_within_24h(pub_dt, now):
-                              continue
-                          if is_factual_title(title, strict=True):
-                              score = score_for_category(title, category)
-                              if score > 0:
-                                  out.append((score, pub_dt, title))
-                  except Exception:
-                      pass
-                  if out:
-                      break
-              out.sort(key=lambda x: (x[0], x[1] or datetime.min.replace(tzinfo=BEIJING)), reverse=True)
-              return [title for score, pub_dt, title in out]
+          def classify(title, default="国内"):
+              for category, words in CATEGORY_WORDS.items():
+                  if any(w in title for w in words):
+                      return category
+              return default if default in QUOTAS else "国内"
 
-          def extract_daily_api_news():
-              results = []
-              def walk(value):
-                  if isinstance(value, dict):
-                      for v in value.values():
+          def extract_titles_from_json(value):
+              titles = []
+              def walk(obj):
+                  if isinstance(obj, dict):
+                      for key in ["title", "name", "word", "desc", "hot_word", "keyword"]:
+                          if key in obj and isinstance(obj[key], str):
+                              titles.append(obj[key])
+                      for v in obj.values():
                           walk(v)
-                  elif isinstance(value, list):
-                      for v in value:
+                  elif isinstance(obj, list):
+                      for v in obj:
                           walk(v)
-                  elif isinstance(value, str):
-                      for line in re.split(r"[\n\r]+", value):
-                          title = clean_text(line)
-                          if is_factual_title(title, strict=False):
-                              results.append(title)
-              for url in DAILY_NEWS_APIS:
+              walk(value)
+              return titles
+
+          def fetch_hot():
+              items = []
+              for default_category, url in HOT_ENDPOINTS:
                   try:
                       raw = http_get(url)
-                      try:
-                          walk(json.loads(raw))
-                      except Exception:
-                          walk(raw)
-                      if len(results) >= 15:
-                          break
+                      obj = json.loads(raw)
+                      for title in extract_titles_from_json(obj):
+                          title = clean_text(title)
+                          if useful_title(title):
+                              items.append((classify(title, default_category), title))
                   except Exception:
-                      pass
-              return results
+                      continue
+              return items
+
+          def rss_url(query):
+              params = {"q": query, "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
+              return "https://news.google.com/rss/search?" + urllib.parse.urlencode(params)
+
+          def fetch_rss():
+              items = []
+              for default_category, query in RSS_FALLBACKS:
+                  try:
+                      raw = http_get(rss_url(query))
+                      root = ET.fromstring(raw)
+                      for item in root.findall(".//item")[:30]:
+                          title = clean_text(item.findtext("title"))
+                          if useful_title(title):
+                              items.append((classify(title, default_category), title))
+                  except Exception:
+                      continue
+              return items
 
           def dedupe(items):
               out = []
               seen = set()
-              for item in items:
-                  key = re.sub(r"\W+", "", item.lower())[:80]
+              for category, title in items:
+                  key = re.sub(r"\W+", "", title.lower())[:80]
                   if key and key not in seen:
                       seen.add(key)
-                      out.append(item)
+                      out.append((category, title))
               return out
 
-          def classify(title):
-              for category, words in CATEGORY_WORDS.items():
-                  if any(w in title for w in words):
-                      return category
-              return "other"
+          def choose_balanced(items):
+              items = dedupe(items)
+              buckets = {k: [] for k in QUOTAS}
+              for category, title in items:
+                  buckets.setdefault(category, []).append(title)
 
-          def get_news(now):
               picked = []
-              pools = []
-              for category, quota, query in TOPICS:
-                  pool = dedupe(fetch_category(category, query, now))
-                  pools.append((category, quota, pool))
-                  picked.extend(pool[:quota])
-              picked = dedupe(picked)
+              used = set()
+              for category, quota in QUOTAS.items():
+                  for title in buckets.get(category, [])[:quota]:
+                      if title not in used:
+                          picked.append(title)
+                          used.add(title)
 
-              counts = {category: 0 for category, _, _ in TOPICS}
-              for category, quota, pool in pools:
-                  for title in pool[:quota]:
-                      if title in picked:
-                          counts[category] += 1
-
-              # 用每日新闻接口补足，但依然均衡分类，避免单一领域霸榜。
-              if len(picked) < TARGET_TOTAL:
-                  for title in dedupe(extract_daily_api_news()):
-                      if title in picked:
-                          continue
-                      category = classify(title)
-                      if category in counts and counts[category] >= 5:
-                          continue
-                      picked.append(title)
-                      if category in counts:
-                          counts[category] += 1
-                      if len(picked) >= TARGET_TOTAL:
-                          break
-
-              # 最后用各类RSS剩余标题补足。
-              if len(picked) < TARGET_TOTAL:
-                  for category, quota, pool in pools:
-                      for item in pool[quota:]:
-                          if item in picked:
-                              continue
-                          if counts.get(category, 0) >= 5:
-                              continue
-                          picked.append(item)
-                          counts[category] = counts.get(category, 0) + 1
-                          if len(picked) >= TARGET_TOTAL:
-                              break
-                      if len(picked) >= TARGET_TOTAL:
-                          break
+              # 如果某类不足，用其他类补足，但单类最多5条，避免霸榜。
+              counts = {k: 0 for k in QUOTAS}
+              for title in picked:
+                  counts[classify(title)] = counts.get(classify(title), 0) + 1
+              for category, title in items:
+                  if len(picked) >= TARGET_TOTAL:
+                      break
+                  if title in used:
+                      continue
+                  c = classify(title, category)
+                  if counts.get(c, 0) >= 5:
+                      continue
+                  picked.append(title)
+                  used.add(title)
+                  counts[c] = counts.get(c, 0) + 1
               return picked[:TARGET_TOTAL]
 
           def get_hangzhou_weather():
@@ -323,7 +279,7 @@ jobs:
                   raise RuntimeError(f"企业微信返回失败：{body}")
 
           now = datetime.now(BEIJING)
-          news = get_news(now)
+          news = choose_balanced(fetch_hot() + fetch_rss())
           lines = ["每日新闻", format_date(now), get_hangzhou_weather(), ""]
           if news:
               for idx, item in enumerate(news, 1):
