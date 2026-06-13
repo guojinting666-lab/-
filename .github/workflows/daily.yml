@@ -3,14 +3,19 @@ name: Daily Light Brief
 on:
   workflow_dispatch:
   schedule:
-    # 00:00 UTC = 08:00 Beijing time
     - cron: "0 0 * * *"
+
+permissions:
+  contents: write
 
 jobs:
   send-brief:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate 15-item light brief and push to WeCom
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate long-run brief and push to WeCom
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
@@ -18,15 +23,19 @@ jobs:
         run: |
           python - <<'PY'
           import email.utils
+          import hashlib
           import html
           import json
           import os
+          import random
           import re
+          import urllib.parse
           import urllib.request
           import xml.etree.ElementTree as ET
-          from datetime import datetime, timedelta, timezone
+          from datetime import date, datetime, timedelta, timezone
 
           BEIJING = timezone(timedelta(hours=8))
+          STATE_FILE = ".brief_state.json"
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
           SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY")
           SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL") or "Qwen/Qwen2.5-7B-Instruct"
@@ -35,89 +44,59 @@ jobs:
           WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
           CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
           CN_DAYS = ["", "一日", "二日", "三日", "四日", "五日", "六日", "七日", "八日", "九日", "十日", "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日", "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
+          LUNAR_MONTHS = ["", "正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"]
+          LUNAR_DAYS = ["", "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十", "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十", "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"]
           WEATHER_CODES = {0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",48:"雾凇",51:"小毛毛雨",53:"毛毛雨",55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"}
-
           HOLIDAYS_2026 = [("端午节", "2026-06-19"), ("中秋节", "2026-09-25"), ("国庆节", "2026-10-01")]
-          LUNAR_2026 = {
-              "2026-06-13": "农历四月廿八",
-              "2026-06-14": "农历四月廿九",
-              "2026-06-15": "农历五月初一",
-              "2026-06-16": "农历五月初二",
-              "2026-06-17": "农历五月初三",
-              "2026-06-18": "农历五月初四",
-              "2026-06-19": "农历五月初五，端午节",
-              "2026-06-20": "农历五月初六",
-          }
-          SOLAR_TERMS_2026 = [
-              ("芒种", "2026-06-05"),
-              ("夏至", "2026-06-21"),
-              ("小暑", "2026-07-07"),
-              ("大暑", "2026-07-23"),
-              ("立秋", "2026-08-07"),
-          ]
           FOOTBALL_LEAGUES = [("世界杯", "fifa.world"), ("欧冠", "uefa.champions"), ("英超", "eng.1"), ("西甲", "esp.1"), ("意甲", "ita.1"), ("德甲", "ger.1"), ("法甲", "fra.1"), ("中超", "chn.1")]
           TECH_RSS = [("OpenAI", "https://openai.com/blog/rss.xml"), ("Apple", "https://www.apple.com/newsroom/rss-feed.rss"), ("Google", "https://blog.google/rss/"), ("Microsoft", "https://blogs.microsoft.com/feed/"), ("GitHub", "https://github.blog/feed/")]
           TEAM_ZH = {"Bosnia-Herz":"波黑","Bosnia and Herzegovina":"波黑","Canada":"加拿大","Paraguay":"巴拉圭","USA":"美国","United States":"美国","Switzerland":"瑞士","Qatar":"卡塔尔","England":"英格兰","Spain":"西班牙","France":"法国","Germany":"德国","Italy":"意大利","Brazil":"巴西","Argentina":"阿根廷"}
 
-          MOVIES = [
-              ("《千与千寻》", "宫崎骏", "适合在疲惫时看，关于迷路、劳动和重新找回自己。"),
-              ("《十二怒汉》", "西德尼·吕美特", "一间屋子拍出思辨张力，适合练习判断与倾听。"),
-              ("《海街日记》", "是枝裕和", "清淡但后劲足，适合想看日常质感的时候。"),
-              ("《社交网络》", "大卫·芬奇", "节奏锋利，适合理解互联网创业神话背后的代价。"),
-              ("《机器人总动员》", "皮克斯", "几乎不用对白，也能讲清孤独、爱和文明。"),
-              ("《寄生虫》", "奉俊昊", "类型片外壳下的阶层寓言，信息密度很高。"),
-              ("《爆裂鼓手》", "达米恩·查泽雷", "关于天赋、压迫和执念，适合打鸡血但别全信。"),
+          # Lunar calendar data, 1900-2050. Base date: 1900-01-31 = lunar 1900-01-01.
+          LUNAR_INFO = [
+              0x04bd8,0x04ae0,0x0a570,0x054d5,0x0d260,0x0d950,0x16554,0x056a0,0x09ad0,0x055d2,
+              0x04ae0,0x0a5b6,0x0a4d0,0x0d250,0x1d255,0x0b540,0x0d6a0,0x0ada2,0x095b0,0x14977,
+              0x04970,0x0a4b0,0x0b4b5,0x06a50,0x06d40,0x1ab54,0x02b60,0x09570,0x052f2,0x04970,
+              0x06566,0x0d4a0,0x0ea50,0x06e95,0x05ad0,0x02b60,0x186e3,0x092e0,0x1c8d7,0x0c950,
+              0x0d4a0,0x1d8a6,0x0b550,0x056a0,0x1a5b4,0x025d0,0x092d0,0x0d2b2,0x0a950,0x0b557,
+              0x06ca0,0x0b550,0x15355,0x04da0,0x0a5d0,0x14573,0x052d0,0x0a9a8,0x0e950,0x06aa0,
+              0x0aea6,0x0ab50,0x04b60,0x0aae4,0x0a570,0x05260,0x0f263,0x0d950,0x05b57,0x056a0,
+              0x096d0,0x04dd5,0x04ad0,0x0a4d0,0x0d4d4,0x0d250,0x0d558,0x0b540,0x0b6a0,0x195a6,
+              0x095b0,0x049b0,0x0a974,0x0a4b0,0x0b27a,0x06a50,0x06d40,0x0af46,0x0ab60,0x09570,
+              0x04af5,0x04970,0x064b0,0x074a3,0x0ea50,0x06b58,0x05ac0,0x0ab60,0x096d5,0x092e0,
+              0x0c960,0x0d954,0x0d4a0,0x0da50,0x07552,0x056a0,0x0abb7,0x025d0,0x092d0,0x0cab5,
+              0x0a950,0x0b4a0,0x0baa4,0x0ad50,0x055d9,0x04ba0,0x0a5b0,0x15176,0x052b0,0x0a930,
+              0x07954,0x06aa0,0x0ad50,0x05b52,0x04b60,0x0a6e6,0x0a4e0,0x0d260,0x0ea65,0x0d530,
+              0x05aa0,0x076a3,0x096d0,0x04bd7,0x04ad0,0x0a4d0,0x1d0b6,0x0d250,0x0d520,0x0dd45,
+              0x0b5a0,0x056d0,0x055b2,0x049b0,0x0a577,0x0a4b0,0x0aa50,0x1b255,0x06d20,0x0ada0,
           ]
-          BOOKS = [
-              ("《娱乐至死》", "尼尔·波兹曼", "理解媒介如何改变公共讨论，今天读仍然很锋利。"),
-              ("《置身事内》", "兰小欢", "理解中国地方政府和经济运行的入门书。"),
-              ("《枪炮、病菌与钢铁》", "贾雷德·戴蒙德", "从地理和技术角度解释文明差异，适合拓宽视角。"),
-              ("《悉达多》", "赫尔曼·黑塞", "篇幅不长，适合在困惑时读。"),
-              ("《原则》", "瑞·达利欧", "不必全盘接受，但适合学习如何把经验变成系统。"),
-              ("《邓小平时代》", "傅高义", "理解改革开放历史脉络的一本重要传记。"),
-              ("《禅与摩托车维修艺术》", "罗伯特·波西格", "表面是旅行，里面谈质量、理性和生活。"),
-          ]
-          QUOTES = [
-              ("凡是过往，皆为序章。", "莎士比亚", "适合提醒自己：过去不是终点，只是铺垫。"),
-              ("认识你自己。", "德尔斐箴言", "短到不能再短，但几乎是一切选择的起点。"),
-              ("人不是为失败而生的。", "海明威", "硬朗，但不是鸡汤：重点是承认失败仍继续。"),
-              ("真实的平静不是避开车马喧嚣，而是在心中修篱种菊。", "林徽因", "真正的安静更像一种内在秩序。"),
-              ("黑夜无论怎样悠长，白昼总会到来。", "莎士比亚", "适合低谷时读，朴素但有效。"),
-              ("生活不可能像你想象得那么好，但也不会像你想象得那么糟。", "莫泊桑", "提醒我们别被情绪的放大镜骗了。"),
-          ]
-          SCIENCE = [
-              "为什么雨后空气闻起来清新？一部分来自植物油脂和土壤细菌释放的气味分子，被雨滴打散后进入空气。",
-              "为什么咖啡能提神？咖啡因会暂时阻断腺苷受体，让大脑不那么容易收到“困了”的信号。",
-              "为什么飞机窗户是圆角？圆角能减少应力集中，比方形窗更不容易在高压差下产生裂纹。",
-              "为什么运动后心情会变好？运动会促进多巴胺、内啡肽等物质释放，也会提升掌控感。",
-              "为什么手机晚上更伤眼？不是蓝光单独的问题，而是亮度、距离、时长和黑暗环境共同作用。",
-              "为什么热水更容易去油？温度升高会降低油脂黏度，也让表面活性剂更容易包裹油污。",
-          ]
-          ENGLISH = [
-              ("Could you give me a quick update?", "你能快速同步一下进展吗？"),
-              ("Let’s keep it simple.", "我们把它做简单一点。"),
-              ("I’ll take a look and get back to you.", "我看一下再回复你。"),
-              ("That works for me.", "我这边可以。"),
-              ("Can we align on the next step?", "我们能确认一下下一步吗？"),
-              ("I want to make sure I understand correctly.", "我想确认自己理解没错。"),
-          ]
-          LIFE = [
-              "雨天通勤小建议：鞋袜容易湿的话，包里放一双薄袜子，比带一堆纸巾更实用。",
-              "如果上午效率低，先做一个 15 分钟能完成的小任务，启动感比意志力更可靠。",
-              "久坐时每 45-60 分钟起身 2 分钟，比一次性运动更能减少僵硬感。",
-              "睡前半小时把手机亮度调低、消息静音，比强迫自己早睡更容易执行。",
-              "喝咖啡尽量避开起床后立刻喝，上午中段通常更适合。"
-          ]
-          INFO_GAPS = [
-              "今日信息差：很多“免费试用”真正要注意的是自动续费日期，开通后立刻设置取消提醒更稳。",
-              "今日信息差：买电子产品别只看首发价，首发后两到四周常会出现平台券和套装补贴。",
-              "今日信息差：外卖满减不一定便宜，先看实际支付价和配送费，比凑单更有用。",
-              "今日信息差：订酒店时同一家店在不同平台的取消规则可能不同，低价前先看退改条件。",
-              "今日信息差：App 权限里“后台刷新”和“精准定位”最容易默默耗电，用不到就关掉。",
-          ]
+          SOLAR_TERM_NAMES = ["小寒","大寒","立春","雨水","惊蛰","春分","清明","谷雨","立夏","小满","芒种","夏至","小暑","大暑","立秋","处暑","白露","秋分","寒露","霜降","立冬","小雪","大雪","冬至"]
+          SOLAR_TERM_INFO = [0,21208,42467,63836,85337,107014,128867,150921,173149,195551,218072,240693,263343,285989,308563,331033,353350,375494,397447,419210,440795,462224,483532,504758]
 
-          def pick(arr, now, offset=0):
-              return arr[(now.timetuple().tm_yday + offset) % len(arr)]
+          def load_state():
+              if not os.path.exists(STATE_FILE):
+                  return {"used": {}}
+              try:
+                  with open(STATE_FILE, "r", encoding="utf-8") as f:
+                      return json.load(f)
+              except Exception:
+                  return {"used": {}}
+
+          def save_state(state):
+              for k, v in state.get("used", {}).items():
+                  state["used"][k] = v[-500:]
+              with open(STATE_FILE, "w", encoding="utf-8") as f:
+                  json.dump(state, f, ensure_ascii=False, indent=2)
+
+          STATE = load_state()
+
+          def mark_once(kind, text):
+              key = hashlib.sha1(text.encode("utf-8")).hexdigest()
+              used = STATE.setdefault("used", {}).setdefault(kind, [])
+              if key in used:
+                  return False
+              used.append(key)
+              return True
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={"User-Agent":"DailyLightBrief/1.0","Accept":"application/json,application/xml,text/xml,text/html,*/*","Accept-Language":"zh-CN,zh;q=0.9,en;q=0.5"})
@@ -147,40 +126,84 @@ jobs:
           def date_line(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
+          def lunar_year_days(year):
+              info = LUNAR_INFO[year - 1900]
+              total = 348
+              for i in range(0x8000, 0x8, -1):
+                  if info & i:
+                      total += 1
+              return total + leap_days(year)
+
+          def leap_month(year):
+              return LUNAR_INFO[year - 1900] & 0xf
+
+          def leap_days(year):
+              lm = leap_month(year)
+              if lm:
+                  return 30 if (LUNAR_INFO[year - 1900] & 0x10000) else 29
+              return 0
+
+          def month_days(year, month):
+              return 30 if (LUNAR_INFO[year - 1900] & (0x10000 >> month)) else 29
+
+          def lunar_date_text(day):
+              offset = (day - date(1900, 1, 31)).days
+              year = 1900
+              while year < 2050 and offset >= lunar_year_days(year):
+                  offset -= lunar_year_days(year)
+                  year += 1
+              lm = leap_month(year)
+              is_leap = False
+              month = 1
+              while month <= 12:
+                  md = leap_days(year) if is_leap else month_days(year, month)
+                  if offset < md:
+                      break
+                  offset -= md
+                  if lm == month and not is_leap:
+                      is_leap = True
+                  else:
+                      if is_leap:
+                          is_leap = False
+                      month += 1
+              prefix = "闰" if is_leap else ""
+              return f"农历{prefix}{LUNAR_MONTHS[month]}{LUNAR_DAYS[offset + 1]}"
+
+          def solar_term_for_day(day):
+              year = day.year
+              base = datetime(1900, 1, 6, 2, 5, tzinfo=BEIJING)
+              for i, name in enumerate(SOLAR_TERM_NAMES):
+                  minutes = 525948.76 * (year - 1900) + SOLAR_TERM_INFO[i]
+                  term_day = (base + timedelta(minutes=minutes)).date()
+                  diff = (term_day - day).days
+                  if diff == 0:
+                      return f"今天是{name}"
+                  if 0 < diff <= 15:
+                      return f"距离{name}还有{diff}天"
+              return ""
+
           def uv_note(uv):
-              if uv is None:
-                  return ""
+              if uv is None: return ""
               uv = float(uv)
-              if uv < 3:
-                  return "紫外线较弱"
-              if uv < 6:
-                  return "紫外线中等，长时间户外建议防晒"
-              if uv < 8:
-                  return "紫外线较强，建议防晒"
+              if uv < 3: return "紫外线较弱"
+              if uv < 6: return "紫外线中等，长时间户外建议防晒"
+              if uv < 8: return "紫外线较强，建议防晒"
               return "紫外线很强，尽量减少暴晒"
 
           def aqi_note(aqi):
-              if aqi is None:
-                  return ""
+              if aqi is None: return ""
               aqi = float(aqi)
-              if aqi <= 50:
-                  return "空气好，适合户外"
-              if aqi <= 100:
-                  return "空气可接受"
-              if aqi <= 150:
-                  return "轻度污染，敏感人群少久待户外"
-              if aqi <= 200:
-                  return "中度污染，建议减少户外运动"
+              if aqi <= 50: return "空气好，适合户外"
+              if aqi <= 100: return "空气可接受"
+              if aqi <= 150: return "轻度污染，敏感人群少久待户外"
+              if aqi <= 200: return "中度污染，建议减少户外运动"
               return "污染较重，尽量减少户外活动"
 
           def pm25_note(pm25):
-              if pm25 is None:
-                  return ""
+              if pm25 is None: return ""
               pm25 = float(pm25)
-              if pm25 <= 35:
-                  return "PM2.5较低"
-              if pm25 <= 75:
-                  return "PM2.5偏高，敏感人群注意"
+              if pm25 <= 35: return "PM2.5较低"
+              if pm25 <= 75: return "PM2.5偏高，敏感人群注意"
               return "PM2.5较高，建议减少户外暴露"
 
           def weather_air_item(day_offset=0):
@@ -202,76 +225,55 @@ jobs:
                   try:
                       aq = json.loads(http_get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=30.2741&longitude=120.1551&current=pm2_5,us_aqi&timezone=Asia%2FShanghai", timeout=15)).get("current", {})
                       if aq.get("us_aqi") is not None:
-                          air = f"，AQI {round(float(aq['us_aqi']))}（{aqi_note(aq.get('us_aqi'))}）"
+                          air += f"，AQI {round(float(aq['us_aqi']))}（{aqi_note(aq.get('us_aqi'))}）"
                       if aq.get("pm2_5") is not None:
                           air += f"，PM2.5 {round(float(aq['pm2_5']), 1)}（{pm25_note(aq.get('pm2_5'))}）"
                   except Exception:
                       pass
                   extra = []
-                  if pop is not None:
-                      extra.append(f"降水概率{int(pop)}%")
-                  if uv is not None:
-                      extra.append(f"紫外线{round(float(uv), 1)}（{uv_note(uv)}）")
-                  tomorrow = weather_air_item(1)
-                  return f"天气空气：今天杭州{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extra) if extra else "") + air + f"；{tomorrow}"
+                  if pop is not None: extra.append(f"降水概率{int(pop)}%")
+                  if uv is not None: extra.append(f"紫外线{round(float(uv), 1)}（{uv_note(uv)}）")
+                  return f"天气空气：今天杭州{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extra) if extra else "") + air + f"；{weather_air_item(1)}"
               except Exception:
                   return "天气空气：杭州天气暂时获取失败"
 
           def calendar_item(now):
               today = now.date()
-              bits = []
-              lunar = LUNAR_2026.get(today.strftime("%Y-%m-%d"))
-              if lunar:
-                  bits.append(lunar)
-              next_term = None
-              for name, day in SOLAR_TERMS_2026:
-                  d = datetime.strptime(day, "%Y-%m-%d").date()
-                  diff = (d - today).days
-                  if diff >= 0:
-                      next_term = f"距离{name}还有{diff}天" if diff else f"今天是{name}"
-                      break
-              if next_term:
-                  bits.append(next_term)
+              bits = [lunar_date_text(today)]
+              st = solar_term_for_day(today)
+              if st: bits.append(st)
               for name, day in HOLIDAYS_2026:
                   d = datetime.strptime(day, "%Y-%m-%d").date()
                   diff = (d - today).days
                   if 0 <= diff <= 30:
                       bits.append(f"距离{name}还有{diff}天")
                       break
-              if now.weekday() == 6:
-                  bits.append("今天是周日，明天工作日")
-              elif now.weekday() == 4:
-                  bits.append("今天是周五，周末前最后一个工作日")
-              return "日历：" + "；".join(bits) if bits else "日历：今天是普通工作/生活日，按自己的节奏推进"
+              if now.weekday() == 6: bits.append("今天是周日，明天工作日")
+              elif now.weekday() == 4: bits.append("今天是周五，周末前最后一个工作日")
+              return "日历：" + "；".join(bits)
 
           def history_item(now):
               try:
                   obj = json.loads(http_get(f"https://zh.wikipedia.org/api/rest_v1/feed/onthisday/events/{now.month}/{now.day}", timeout=20))
-                  old_events = []
+                  candidates = []
                   for ev in obj.get("events", []):
                       text = clean(ev.get("text"))
                       year = ev.get("year")
-                      if not text or len(text) > 90 or any(x in text for x in ["出生", "逝世"]):
+                      if not text or len(text) > 95 or any(x in text for x in ["出生", "逝世"]):
                           continue
                       if isinstance(year, int) and year <= now.year - 50:
-                          old_events.append((year, text))
-                  if old_events:
-                      year, text = old_events[0]
-                      return f"历史：{year}年，{text}"
-                  for ev in obj.get("events", []):
-                      text = clean(ev.get("text"))
-                      year = ev.get("year")
-                      if text and len(text) <= 90 and not any(x in text for x in ["出生", "逝世"]):
-                          return f"历史：{year}年，{text}"
+                          candidates.append(f"历史：{year}年，{text}")
+                  for item in candidates + [f"历史：{clean(ev.get('year'))}年，{clean(ev.get('text'))}" for ev in obj.get("events", []) if clean(ev.get("text"))]:
+                      if mark_once("history", item):
+                          return item
               except Exception:
                   pass
-              return "历史：今天也许没有被记住的大事，但普通的一天也值得认真过"
+              return "历史：今天没有抓到合适的远年事件"
 
           def parse_pubdate(text):
               try:
                   dt = email.utils.parsedate_to_datetime(text)
-                  if dt.tzinfo is None:
-                      dt = dt.replace(tzinfo=timezone.utc)
+                  if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
                   return dt.astimezone(BEIJING)
               except Exception:
                   return None
@@ -284,8 +286,7 @@ jobs:
                       for item in root.findall(".//item")[:8]:
                           title = clean(item.findtext("title"))
                           pub = parse_pubdate(item.findtext("pubDate"))
-                          if pub and now - pub > timedelta(days=14):
-                              continue
+                          if pub and now - pub > timedelta(days=14): continue
                           if title and len(title) <= 110 and any(k.lower() in title.lower() for k in keywords):
                               return f"科技：{name} 官方更新，{title}"
                   except Exception:
@@ -303,8 +304,7 @@ jobs:
                           for event in obj.get("events", [])[:5]:
                               comp = (event.get("competitions") or [{}])[0]
                               teams = comp.get("competitors", [])
-                              if len(teams) < 2:
-                                  continue
+                              if len(teams) < 2: continue
                               home = next((x for x in teams if x.get("homeAway") == "home"), teams[0])
                               away = next((x for x in teams if x.get("homeAway") == "away"), teams[1])
                               hn = zh_text(home.get("team", {}).get("shortDisplayName") or home.get("team", {}).get("displayName"))
@@ -314,123 +314,166 @@ jobs:
                               state = st.get("state")
                               detail = zh_text(st.get("shortDetail") or comp.get("status", {}).get("displayClock") or "")
                               key = f"{label}{an}{hn}{day}"
-                              if key in seen:
-                                  continue
+                              if key in seen: continue
                               seen.add(key)
-                              if state == "post" and hs is not None and ass is not None:
-                                  items.append(f"足球：{label} {an} {ass}-{hs} {hn}")
-                              elif state == "pre":
-                                  items.append(f"足球：{label} {an} vs {hn}，{detail}")
-                              else:
-                                  items.append(f"足球：{label} {an} {ass or ''}-{hs or ''} {hn}，{detail}")
-                              if len(items) >= limit:
-                                  return items
+                              if state == "post" and hs is not None and ass is not None: items.append(f"{label} {an} {ass}-{hs} {hn}")
+                              elif state == "pre": items.append(f"{label} {an} vs {hn}，{detail}")
+                              else: items.append(f"{label} {an} {ass or ''}-{hs or ''} {hn}，{detail}")
+                              if len(items) >= limit: return items
                       except Exception:
                           continue
-              return items or ["足球：今天暂未抓到重点比赛赛程或比分"]
+              return items or ["今天暂未抓到重点比赛赛程或比分"]
 
           def steam_item():
               try:
                   obj = json.loads(http_get("https://store.steampowered.com/api/featuredcategories?cc=cn&l=schinese", timeout=18))
                   names = [clean(x.get("name")) for x in obj.get("top_sellers", {}).get("items", []) if clean(x.get("name"))][:3]
-                  if names:
-                      return f"游戏：Steam 热销榜前列包括《{'》《'.join(names)}》"
+                  if names: return f"游戏：Steam 热销榜前列包括《{'》《'.join(names)}》"
               except Exception:
                   pass
               return "游戏：Steam 热销榜暂时获取失败"
 
+          def online_movie_item():
+              try:
+                  obj = json.loads(http_get("https://rss.applemarketingtools.com/api/v2/us/movies/top-movies/all/25/explicit.json", timeout=18))
+                  for x in obj.get("feed", {}).get("results", []):
+                      name = clean(x.get("name"))
+                      genre = clean((x.get("genres") or [{}])[0].get("name"))
+                      if name and mark_once("movie", name):
+                          return f"电影：Apple 电影榜推荐《{name}》，类型：{genre or '电影'}"
+              except Exception:
+                  pass
+              return "电影：今日电影榜暂时获取失败"
+
+          def online_book_item():
+              try:
+                  obj = json.loads(http_get("https://openlibrary.org/trending/daily.json", timeout=18))
+                  for x in obj.get("works", [])[:30]:
+                      title = clean(x.get("title"))
+                      authors = ", ".join(clean(a.get("name")) for a in x.get("author_name", [])[:2]) if isinstance(x.get("author_name"), list) else ""
+                      if title and mark_once("book", title):
+                          return f"好书：Open Library 趋势书《{title}》" + (f"，作者 {authors}" if authors else "")
+              except Exception:
+                  pass
+              return "好书：今日趋势书暂时获取失败"
+
+          def quote_item():
+              try:
+                  obj = json.loads(http_get("https://api.quotable.io/random?maxLength=80", timeout=15))
+                  quote = clean(obj.get("content"))
+                  author = clean(obj.get("author"))
+                  item = f"摘抄：{quote}——{author}"
+                  if quote and mark_once("quote", item): return item
+              except Exception:
+                  pass
+              return "摘抄：今天没有抓到合适的短句"
+
+          def science_item():
+              try:
+                  obj = json.loads(http_get("https://zh.wikipedia.org/api/rest_v1/page/random/summary", timeout=15))
+                  title = clean(obj.get("title"))
+                  extract = clean(obj.get("extract"))
+                  if title and extract and len(extract) > 30:
+                      text = extract[:90].rstrip("，。；;") + "。"
+                      if mark_once("science", title):
+                          return f"科普：{title}——{text}"
+              except Exception:
+                  pass
+              return "科普：今天的随机百科暂时获取失败"
+
           def yesterday_hot_item():
-              urls = [
-                  "https://api-hot.imsyy.top/baidu",
-                  "https://api-hot.imsyy.top/toutiao",
-                  "https://api-hot.imsyy.top/weibo",
-                  "https://api-hot.imsyy.top/zhihu",
-              ]
-              bad = ["股票", "股价", "财报", "广告", "直播", "彩票", "星座", "美女", "网红", "八卦", "开播", "抽奖", "第几", "多少", "为何", "一文读懂"]
+              urls = ["https://api-hot.imsyy.top/baidu","https://api-hot.imsyy.top/toutiao","https://api-hot.imsyy.top/weibo","https://api-hot.imsyy.top/zhihu"]
+              bad = ["股票","股价","财报","广告","直播","彩票","星座","美女","网红","八卦","开播","抽奖","第几","多少","为何","一文读懂"]
               def walk(obj):
                   if isinstance(obj, dict):
-                      for key in ["title", "name", "word", "desc", "hot_word", "keyword"]:
-                          if isinstance(obj.get(key), str):
-                              yield obj[key]
-                      for v in obj.values():
-                          yield from walk(v)
+                      for key in ["title","name","word","desc","hot_word","keyword"]:
+                          if isinstance(obj.get(key), str): yield obj[key]
+                      for v in obj.values(): yield from walk(v)
                   elif isinstance(obj, list):
-                      for v in obj:
-                          yield from walk(v)
+                      for v in obj: yield from walk(v)
               for url in urls:
                   try:
                       obj = json.loads(http_get(url, timeout=15))
                       for raw in walk(obj):
                           title = clean(raw)
-                          if len(title) < 8 or len(title) > 60:
-                              continue
-                          if any(x in title for x in bad):
-                              continue
-                          return f"昨日热点：{title}"
+                          if 8 <= len(title) <= 60 and not any(x in title for x in bad) and mark_once("hot", title):
+                              return f"昨日热点：{title}"
                   except Exception:
                       continue
               return None
 
-          def tomorrow_focus_item(now):
-              parts = [weather_air_item(1).replace("明天天气：", "明天天气：")]
-              tomorrow = now + timedelta(days=1)
-              if tomorrow.weekday() == 0:
-                  parts.append("明天是周一，注意恢复工作日节奏")
-              elif tomorrow.weekday() == 5:
-                  parts.append("明天是周六，适合提前安排出行或休息")
-              elif tomorrow.weekday() == 6:
-                  parts.append("明天是周日，适合把下周安排提前理一遍")
-              for name, day in HOLIDAYS_2026:
-                  d = datetime.strptime(day, "%Y-%m-%d").date()
-                  diff = (d - tomorrow.date()).days
-                  if 0 <= diff <= 7:
-                      parts.append(f"明天距离{name}还有{diff}天")
-                      break
-              return "明日看点：" + "；".join(parts)
+          def info_gap_item(now):
+              prompt = f"请写一条适合年轻人的“今日信息差”，必须具体、实用、非鸡汤，30字以内。今天日期：{now.strftime('%Y-%m-%d')}。只输出一句中文。"
+              if SILICONFLOW_API_KEY:
+                  try:
+                      raw = post_json(SILICONFLOW_URL, {"model":SILICONFLOW_MODEL,"messages":[{"role":"user","content":prompt}],"temperature":0.4,"max_tokens":100}, timeout=60, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
+                      text = clean(json.loads(raw)["choices"][0]["message"]["content"])
+                      if text and mark_once("info_gap", text):
+                          return "今日信息差：" + text
+                  except Exception:
+                      pass
+              return "今日信息差：重要 App 的自动续费最好开通后立刻设置取消提醒"
+
+          def english_item(now):
+              if SILICONFLOW_API_KEY:
+                  try:
+                      prompt = f"给一个今天可用的实用英语短句，格式：英语 / 中文。不要名言，不要鸡汤。日期：{now.strftime('%Y-%m-%d')}。"
+                      raw = post_json(SILICONFLOW_URL, {"model":SILICONFLOW_MODEL,"messages":[{"role":"user","content":prompt}],"temperature":0.3,"max_tokens":100}, timeout=60, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
+                      text = clean(json.loads(raw)["choices"][0]["message"]["content"])
+                      if text and mark_once("english", text):
+                          return "英语：" + text
+                  except Exception:
+                      pass
+              return "英语：Could you give me a quick update? / 你能快速同步一下进展吗？"
+
+          def life_item(now):
+              if SILICONFLOW_API_KEY:
+                  try:
+                      prompt = f"写一条城市生活小建议，具体实用，不要鸡汤，35字以内。日期：{now.strftime('%Y-%m-%d')}。"
+                      raw = post_json(SILICONFLOW_URL, {"model":SILICONFLOW_MODEL,"messages":[{"role":"user","content":prompt}],"temperature":0.4,"max_tokens":100}, timeout=60, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
+                      text = clean(json.loads(raw)["choices"][0]["message"]["content"])
+                      if text and mark_once("life", text):
+                          return "生活：" + text
+                  except Exception:
+                      pass
+              return "生活：雨天通勤包里放一双薄袜子，比临时找纸巾更实用"
 
           def translate_items(items):
-              if not SILICONFLOW_API_KEY:
-                  return items
-              payload = {"model": SILICONFLOW_MODEL, "messages":[{"role":"system","content":"你是中文晨报编辑。只输出JSON数组。把英文翻译成自然中文；保留比分、书名、片名、游戏名和事实；不要添加新事实。"},{"role":"user","content":json.dumps(items, ensure_ascii=False)}], "temperature":0.1, "max_tokens":1800}
+              if not SILICONFLOW_API_KEY: return items
+              payload = {"model":SILICONFLOW_MODEL,"messages":[{"role":"system","content":"你是中文晨报编辑。只输出JSON数组。把英文翻译成自然中文；保留比分、书名、片名、游戏名和事实；不要添加新事实。"},{"role":"user","content":json.dumps(items, ensure_ascii=False)}],"temperature":0.1,"max_tokens":1800}
               try:
-                  raw = post_json(SILICONFLOW_URL, payload, timeout=90, headers={"Authorization": f"Bearer {SILICONFLOW_API_KEY}"})
+                  raw = post_json(SILICONFLOW_URL, payload, timeout=90, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
                   text = json.loads(raw)["choices"][0]["message"]["content"].strip()
                   m = re.search(r"\[[\s\S]*\]", text)
                   data = json.loads(m.group(0) if m else text)
-                  if isinstance(data, list) and len(data) == len(items):
-                      return [clean(x) for x in data]
+                  if isinstance(data, list) and len(data) == len(items): return [clean(x) for x in data]
               except Exception as e:
                   print("中文化失败：", str(e)[:300])
               return items
 
           def build_content():
               now = datetime.now(BEIJING)
-              movie = pick(MOVIES, now)
-              book = pick(BOOKS, now, 2)
-              quote = pick(QUOTES, now, 4)
-              english = pick(ENGLISH, now, 1)
+              football = football_items(now, 2)
               items = [
                   weather_air_item(0),
                   calendar_item(now),
                   history_item(now),
-              ]
-              football = football_items(now, 2)
-              hot = yesterday_hot_item()
-              items.append("足球：" + "；".join(x.replace("足球：", "") for x in football))
-              items.extend([
+                  "足球：" + "；".join(football),
                   steam_item(),
                   tech_item(now),
-                  pick(INFO_GAPS, now, 7),
-                  f"电影：今天推荐{movie[0]}，导演{movie[1]}；{movie[2]}",
-                  f"好书：今天推荐{book[0]}，作者{book[1]}；{book[2]}",
-                  f"摘抄：{quote[0]}——{quote[1]}",
-                  f"科普：{pick(SCIENCE, now, 3)}",
-                  f"英语：{english[0]} / {english[1]}",
-                  f"生活：{pick(LIFE, now, 5)}",
-                  tomorrow_focus_item(now),
+              ]
+              hot = yesterday_hot_item()
+              if hot: items.append(hot)
+              items.extend([
+                  info_gap_item(now),
+                  online_movie_item(),
+                  online_book_item(),
+                  quote_item(),
+                  science_item(),
+                  english_item(now),
+                  life_item(now),
+                  "明日看点：" + weather_air_item(1),
               ])
-              if hot:
-                  items.insert(6, hot)
               items = translate_items(items)
               lines = ["每日轻量晨报", date_line(now)]
               for i, item in enumerate(items[:15], 1):
@@ -438,15 +481,24 @@ jobs:
               return "\n".join(lines)
 
           def send_wecom(content):
-              if not WECOM_WEBHOOK:
-                  raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
+              if not WECOM_WEBHOOK: raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
               raw = post_json(WECOM_WEBHOOK, {"msgtype":"markdown","markdown":{"content":content}})
               print(raw)
-              if json.loads(raw).get("errcode") != 0:
-                  raise RuntimeError("企业微信返回失败：" + raw)
+              if json.loads(raw).get("errcode") != 0: raise RuntimeError("企业微信返回失败：" + raw)
 
-          print("脚本版本：light-brief-v6")
+          print("脚本版本：light-brief-v7-longrun")
           content = build_content()
           print(content)
           send_wecom(content)
+          save_state(STATE)
           PY
+
+      - name: Save dedupe state
+        run: |
+          if [ -f .brief_state.json ] && [ -n "$(git status --porcelain .brief_state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .brief_state.json
+            git commit -m "Update daily brief state"
+            git push
+          fi
