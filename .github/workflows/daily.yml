@@ -15,7 +15,6 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           python - <<'PY'
-          import email.utils
           import html
           import json
           import os
@@ -27,6 +26,7 @@ jobs:
 
           BEIJING = timezone(timedelta(hours=8))
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
+          TARGET_TOTAL = 15
 
           WEATHER_CODES = {
               0: "晴", 1: "大部晴朗", 2: "局部多云", 3: "阴",
@@ -41,28 +41,29 @@ jobs:
                      "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日",
                      "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
 
-          TOPIC_QUERIES = [
-              ("tech", "AI 人工智能 科技 互联网 手机 芯片 机器人 新能源 游戏"),
-              ("football", "足球 世界杯 欧冠 英超 西甲 中超 国足 转会 懂球帝 直播吧"),
-              ("world", "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 热点"),
-              ("business", "商业 公司 字节 腾讯 阿里 苹果 特斯拉 英伟达 OpenAI 市场"),
-              ("life", "年轻人 消费 电影 音乐 游戏 教育 就业 社交平台"),
+          TOPICS = [
+              ("international", 3, "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 热点 外交 冲突"),
+              ("china_society", 3, "中国 社会 民生 教育 医疗 交通 天气 消费 新规 热点"),
+              ("business", 3, "财经 商业 公司 股市 房地产 新能源 汽车 消费 市场"),
+              ("tech", 3, "科技 AI 人工智能 手机 芯片 机器人 互联网 游戏 新能源"),
+              ("sports_ent", 3, "足球 体育 世界杯 欧冠 中超 国足 电影 音乐 文娱 票房"),
           ]
 
-          POSITIVE = [
-              "AI", "人工智能", "OpenAI", "大模型", "机器人", "芯片", "英伟达", "苹果", "华为",
-              "小米", "特斯拉", "新能源汽车", "互联网", "游戏", "电影", "票房", "社交平台",
-              "足球", "世界杯", "欧冠", "英超", "西甲", "中超", "国足", "转会", "国际",
-              "美国", "欧洲", "日本", "韩国", "中东", "俄乌", "公司", "商业", "上市",
-              "裁员", "涨价", "降价", "发布", "官宣", "回应", "调查", "禁令", "新规",
-          ]
+          CATEGORY_WORDS = {
+              "international": ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "以色列", "伊朗", "联合国", "国际", "总统", "政府", "制裁", "冲突", "停火"],
+              "china_society": ["中国", "国内", "杭州", "北京", "上海", "广州", "教育", "高考", "医疗", "医保", "交通", "铁路", "天气", "消费", "新规", "警方", "法院"],
+              "business": ["财经", "股市", "A股", "港股", "美元", "人民币", "房价", "楼市", "公司", "上市", "汽车", "新能源", "特斯拉", "比亚迪", "市场"],
+              "tech": ["科技", "AI", "人工智能", "大模型", "芯片", "手机", "华为", "苹果", "小米", "英伟达", "机器人", "互联网", "游戏"],
+              "sports_ent": ["足球", "世界杯", "欧冠", "英超", "西甲", "中超", "国足", "转会", "电影", "票房", "音乐", "演唱会", "文娱"],
+          }
 
-          NEGATIVE = [
+          BAD_WORDS = [
               "学习贯彻", "重要讲话", "会议指出", "会议强调", "高质量发展", "现代化建设",
               "扎实推进", "谱写新篇", "开创新局面", "凝心聚力", "工作会议", "座谈会",
-              "调研时强调", "精神文明", "主题教育", "党建", "党纪", "公报", "白皮书",
-              "宏观政策", "稳中求进", "营商环境持续优化", "乡村振兴工作", "每日一言",
-              "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤",
+              "调研时强调", "主题教育", "党建", "党纪", "公报", "白皮书", "每日一言",
+              "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤", "一图读懂",
+              "一文读懂", "背后原因", "原因找到了", "网友炸锅", "冲上热搜", "引热议",
+              "什么情况", "怎么回事", "为何", "为什么", "你怎么看", "速看", "注意了",
           ]
 
           def http_get(url, timeout=25):
@@ -88,89 +89,85 @@ jobs:
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
 
-          def useful_score(text, topic):
-              if not text or len(text) < 10 or len(text) > 110 or not has_chinese(text):
-                  return -999
-              if any(x in text for x in NEGATIVE):
-                  return -50
-              score = 0
-              if any(x in text for x in POSITIVE):
-                  score += 8
-              if topic == "tech" and any(x in text for x in ["AI", "人工智能", "芯片", "机器人", "手机", "游戏", "苹果", "华为", "英伟达"]):
-                  score += 8
-              if topic == "football" and any(x in text for x in ["足球", "世界杯", "欧冠", "英超", "中超", "国足", "转会", "比分", "进球"]):
-                  score += 8
-              if topic == "world" and any(x in text for x in ["美国", "欧洲", "日本", "韩国", "中东", "俄乌", "国际"]):
-                  score += 6
-              if re.search(r"\d", text):
-                  score += 2
-              if any(x in text for x in ["回应", "官宣", "发布", "确认", "首次", "新规", "禁令", "调查"]):
-                  score += 3
-              return score
+          def is_self_explanatory(text):
+              if not text or len(text) < 14 or len(text) > 115 or not has_chinese(text):
+                  return False
+              if any(x in text for x in BAD_WORDS):
+                  return False
+              # 标题最好包含明确主体和明确动作/结果，避免纯悬念标题。
+              action_words = [
+                  "发布", "宣布", "确认", "通过", "实施", "上涨", "下跌", "增长", "下降",
+                  "禁止", "允许", "恢复", "取消", "推出", "上线", "下架", "召回", "调查",
+                  "逮捕", "起诉", "判决", "死亡", "受伤", "夺冠", "晋级", "击败", "战胜",
+                  "签约", "加盟", "续约", "裁员", "涨价", "降价", "破", "超", "将",
+              ]
+              has_number = re.search(r"\d", text) is not None
+              has_action = any(x in text for x in action_words)
+              has_colon = "：" in text or ":" in text
+              return has_action or has_number or has_colon
 
           def rss_url(query):
               params = {"q": query, "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
               return "https://news.google.com/rss/search?" + urllib.parse.urlencode(params)
 
-          def fetch_google_news():
-              candidates = []
-              for topic, query in TOPIC_QUERIES:
-                  try:
-                      raw = http_get(rss_url(query))
-                      root = ET.fromstring(raw)
-                      for item in root.findall(".//item")[:30]:
-                          title = clean_text(item.findtext("title"))
-                          if not title:
-                              continue
-                          score = useful_score(title, topic)
-                          if score > 0:
-                              candidates.append((score, title))
-                  except Exception:
-                      pass
-              return candidates
+          def score_for_category(text, category):
+              score = 0
+              for word in CATEGORY_WORDS[category]:
+                  if word in text:
+                      score += 5
+              if re.search(r"\d", text):
+                  score += 2
+              if "：" in text or ":" in text:
+                  score += 1
+              # AI 不再过度加权，防止全是 AI 新闻。
+              if category == "tech" and any(x in text for x in ["AI", "人工智能", "OpenAI", "大模型"]):
+                  score += 2
+              return score
 
-          def fetch_60s_news():
-              urls = [
-                  "https://api.vvhan.com/api/60s?type=json",
-                  "https://api.pearktrue.cn/api/60s/",
-              ]
+          def fetch_category(category, query):
               out = []
-              for url in urls:
-                  try:
-                      raw = http_get(url)
-                      try:
-                          obj = json.loads(raw)
-                          stack = [obj]
-                          while stack:
-                              cur = stack.pop()
-                              if isinstance(cur, dict):
-                                  stack.extend(cur.values())
-                              elif isinstance(cur, list):
-                                  stack.extend(cur)
-                              elif isinstance(cur, str):
-                                  title = clean_text(cur)
-                                  score = useful_score(title, "general")
-                                  if score > 0:
-                                      out.append((score - 2, title))
-                      except Exception:
-                          for line in raw.splitlines():
-                              title = clean_text(line)
-                              score = useful_score(title, "general")
-                              if score > 0:
-                                  out.append((score - 2, title))
-                  except Exception:
-                      pass
+              try:
+                  raw = http_get(rss_url(query))
+                  root = ET.fromstring(raw)
+                  for item in root.findall(".//item")[:35]:
+                      title = clean_text(item.findtext("title"))
+                      if is_self_explanatory(title):
+                          score = score_for_category(title, category)
+                          if score > 0:
+                              out.append((score, title))
+              except Exception:
+                  pass
+              out.sort(key=lambda x: x[0], reverse=True)
+              return [title for score, title in out]
+
+          def dedupe(items):
+              out = []
+              seen = set()
+              for item in items:
+                  key = re.sub(r"\W+", "", item.lower())[:80]
+                  if key and key not in seen:
+                      seen.add(key)
+                      out.append(item)
               return out
 
-          def dedupe_scored(items):
-              best = {}
-              for score, title in items:
-                  key = re.sub(r"\W+", "", title.lower())[:80]
-                  if not key:
-                      continue
-                  if key not in best or score > best[key][0]:
-                      best[key] = (score, title)
-              return [title for score, title in sorted(best.values(), key=lambda x: x[0], reverse=True)]
+          def get_news():
+              picked = []
+              pools = []
+              for category, quota, query in TOPICS:
+                  pool = dedupe(fetch_category(category, query))
+                  pools.append((category, quota, pool))
+                  picked.extend(pool[:quota])
+              picked = dedupe(picked)
+              if len(picked) < TARGET_TOTAL:
+                  for category, quota, pool in pools:
+                      for item in pool[quota:]:
+                          if item not in picked:
+                              picked.append(item)
+                          if len(picked) >= TARGET_TOTAL:
+                              break
+                      if len(picked) >= TARGET_TOTAL:
+                          break
+              return picked[:TARGET_TOTAL]
 
           def get_hangzhou_weather():
               url = (
@@ -178,8 +175,7 @@ jobs:
                   "latitude=30.2741&longitude=120.1551"
                   "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
                   "&current=wind_speed_10m"
-                  "&timezone=Asia%2FShanghai"
-                  "&forecast_days=1"
+                  "&timezone=Asia%2FShanghai&forecast_days=1"
               )
               try:
                   obj = json.loads(http_get(url))
@@ -222,9 +218,7 @@ jobs:
                   raise RuntimeError(f"企业微信返回失败：{body}")
 
           now = datetime.now(BEIJING)
-          items = fetch_google_news() + fetch_60s_news()
-          news = dedupe_scored(items)[:15]
-
+          news = get_news()
           lines = ["每日新闻", format_date(now), get_hangzhou_weather(), ""]
           if news:
               for idx, item in enumerate(news, 1):
@@ -232,7 +226,6 @@ jobs:
                   lines.append("")
           else:
               lines.append("1、今日新闻暂时获取失败，请稍后查看；")
-
           content = "\n".join(lines).strip()
           print(content)
           send_wecom(content)
