@@ -3,6 +3,7 @@ name: Daily Light Brief
 on:
   workflow_dispatch:
   schedule:
+    # 00:00 UTC = 08:00 Beijing time
     - cron: "0 0 * * *"
 
 permissions:
@@ -15,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate long-run brief and push to WeCom
+      - name: Generate wiki brief and push to WeCom
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
@@ -27,7 +28,6 @@ jobs:
           import html
           import json
           import os
-          import random
           import re
           import urllib.parse
           import urllib.request
@@ -44,34 +44,13 @@ jobs:
           WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
           CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
           CN_DAYS = ["", "一日", "二日", "三日", "四日", "五日", "六日", "七日", "八日", "九日", "十日", "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日", "二十日", "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日", "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
-          LUNAR_MONTHS = ["", "正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"]
-          LUNAR_DAYS = ["", "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十", "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十", "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"]
           WEATHER_CODES = {0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",48:"雾凇",51:"小毛毛雨",53:"毛毛雨",55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"}
           HOLIDAYS_2026 = [("端午节", "2026-06-19"), ("中秋节", "2026-09-25"), ("国庆节", "2026-10-01")]
+          SOLAR_TERM_NAMES = ["小寒","大寒","立春","雨水","惊蛰","春分","清明","谷雨","立夏","小满","芒种","夏至","小暑","大暑","立秋","处暑","白露","秋分","寒露","霜降","立冬","小雪","大雪","冬至"]
+          SOLAR_TERM_INFO = [0,21208,42467,63836,85337,107014,128867,150921,173149,195551,218072,240693,263343,285989,308563,331033,353350,375494,397447,419210,440795,462224,483532,504758]
           FOOTBALL_LEAGUES = [("世界杯", "fifa.world"), ("欧冠", "uefa.champions"), ("英超", "eng.1"), ("西甲", "esp.1"), ("意甲", "ita.1"), ("德甲", "ger.1"), ("法甲", "fra.1"), ("中超", "chn.1")]
           TECH_RSS = [("OpenAI", "https://openai.com/blog/rss.xml"), ("Apple", "https://www.apple.com/newsroom/rss-feed.rss"), ("Google", "https://blog.google/rss/"), ("Microsoft", "https://blogs.microsoft.com/feed/"), ("GitHub", "https://github.blog/feed/")]
           TEAM_ZH = {"Bosnia-Herz":"波黑","Bosnia and Herzegovina":"波黑","Canada":"加拿大","Paraguay":"巴拉圭","USA":"美国","United States":"美国","Switzerland":"瑞士","Qatar":"卡塔尔","England":"英格兰","Spain":"西班牙","France":"法国","Germany":"德国","Italy":"意大利","Brazil":"巴西","Argentina":"阿根廷"}
-
-          # Lunar calendar data, 1900-2050. Base date: 1900-01-31 = lunar 1900-01-01.
-          LUNAR_INFO = [
-              0x04bd8,0x04ae0,0x0a570,0x054d5,0x0d260,0x0d950,0x16554,0x056a0,0x09ad0,0x055d2,
-              0x04ae0,0x0a5b6,0x0a4d0,0x0d250,0x1d255,0x0b540,0x0d6a0,0x0ada2,0x095b0,0x14977,
-              0x04970,0x0a4b0,0x0b4b5,0x06a50,0x06d40,0x1ab54,0x02b60,0x09570,0x052f2,0x04970,
-              0x06566,0x0d4a0,0x0ea50,0x06e95,0x05ad0,0x02b60,0x186e3,0x092e0,0x1c8d7,0x0c950,
-              0x0d4a0,0x1d8a6,0x0b550,0x056a0,0x1a5b4,0x025d0,0x092d0,0x0d2b2,0x0a950,0x0b557,
-              0x06ca0,0x0b550,0x15355,0x04da0,0x0a5d0,0x14573,0x052d0,0x0a9a8,0x0e950,0x06aa0,
-              0x0aea6,0x0ab50,0x04b60,0x0aae4,0x0a570,0x05260,0x0f263,0x0d950,0x05b57,0x056a0,
-              0x096d0,0x04dd5,0x04ad0,0x0a4d0,0x0d4d4,0x0d250,0x0d558,0x0b540,0x0b6a0,0x195a6,
-              0x095b0,0x049b0,0x0a974,0x0a4b0,0x0b27a,0x06a50,0x06d40,0x0af46,0x0ab60,0x09570,
-              0x04af5,0x04970,0x064b0,0x074a3,0x0ea50,0x06b58,0x05ac0,0x0ab60,0x096d5,0x092e0,
-              0x0c960,0x0d954,0x0d4a0,0x0da50,0x07552,0x056a0,0x0abb7,0x025d0,0x092d0,0x0cab5,
-              0x0a950,0x0b4a0,0x0baa4,0x0ad50,0x055d9,0x04ba0,0x0a5b0,0x15176,0x052b0,0x0a930,
-              0x07954,0x06aa0,0x0ad50,0x05b52,0x04b60,0x0a6e6,0x0a4e0,0x0d260,0x0ea65,0x0d530,
-              0x05aa0,0x076a3,0x096d0,0x04bd7,0x04ad0,0x0a4d0,0x1d0b6,0x0d250,0x0d520,0x0dd45,
-              0x0b5a0,0x056d0,0x055b2,0x049b0,0x0a577,0x0a4b0,0x0aa50,0x1b255,0x06d20,0x0ada0,
-          ]
-          SOLAR_TERM_NAMES = ["小寒","大寒","立春","雨水","惊蛰","春分","清明","谷雨","立夏","小满","芒种","夏至","小暑","大暑","立秋","处暑","白露","秋分","寒露","霜降","立冬","小雪","大雪","冬至"]
-          SOLAR_TERM_INFO = [0,21208,42467,63836,85337,107014,128867,150921,173149,195551,218072,240693,263343,285989,308563,331033,353350,375494,397447,419210,440795,462224,483532,504758]
 
           def load_state():
               if not os.path.exists(STATE_FILE):
@@ -84,7 +63,7 @@ jobs:
 
           def save_state(state):
               for k, v in state.get("used", {}).items():
-                  state["used"][k] = v[-500:]
+                  state["used"][k] = v[-800:]
               with open(STATE_FILE, "w", encoding="utf-8") as f:
                   json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -99,7 +78,11 @@ jobs:
               return True
 
           def http_get(url, timeout=25):
-              req = urllib.request.Request(url, headers={"User-Agent":"DailyLightBrief/1.0","Accept":"application/json,application/xml,text/xml,text/html,*/*","Accept-Language":"zh-CN,zh;q=0.9,en;q=0.5"})
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": "DailyLightBrief/1.0 (https://github.com/guojinting666-lab)",
+                  "Accept": "application/json,application/xml,text/xml,text/html,*/*",
+                  "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.5",
+              })
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
@@ -114,8 +97,12 @@ jobs:
 
           def clean(text):
               text = html.unescape(str(text or ""))
+              text = re.sub(r"<style[\s\S]*?</style>", "", text)
+              text = re.sub(r"<script[\s\S]*?</script>", "", text)
               text = re.sub(r"<[^>]+>", "", text)
-              return re.sub(r"\s+", " ", text).strip(" ；;，,。")
+              text = re.sub(r"\[[^\]]*\]", "", text)
+              text = re.sub(r"\s+", " ", text).strip()
+              return text.strip(" ；;，,。")
 
           def zh_text(text):
               text = clean(text)
@@ -123,67 +110,46 @@ jobs:
                   text = text.replace(en, zh)
               return text.replace("Scheduled","待开赛").replace("Final","完场").replace("Halftime","中场").replace("Postponed","延期")
 
+          def translate_short(text):
+              if not SILICONFLOW_API_KEY or re.search(r"[\u4e00-\u9fff]", text):
+                  return text
+              try:
+                  raw = post_json(
+                      SILICONFLOW_URL,
+                      {"model": SILICONFLOW_MODEL, "messages":[{"role":"system","content":"把英文信息翻译成自然中文，只输出译文，不添加事实。"},{"role":"user","content":text}], "temperature":0.1, "max_tokens":180},
+                      timeout=60,
+                      headers={"Authorization": f"Bearer {SILICONFLOW_API_KEY}"},
+                  )
+                  return clean(json.loads(raw)["choices"][0]["message"]["content"]) or text
+              except Exception:
+                  return text
+
+          def summarize_wiki(text, prefix):
+              text = clean(text)
+              if SILICONFLOW_API_KEY and len(text) > 60:
+                  try:
+                      raw = post_json(
+                          SILICONFLOW_URL,
+                          {"model": SILICONFLOW_MODEL, "messages":[{"role":"system","content":"把输入压缩成一句自然中文，不超过55字，只保留事实，不添加新信息。"},{"role":"user","content":text}], "temperature":0.1, "max_tokens":160},
+                          timeout=60,
+                          headers={"Authorization": f"Bearer {SILICONFLOW_API_KEY}"},
+                      )
+                      out = clean(json.loads(raw)["choices"][0]["message"]["content"])
+                      if out:
+                          return f"{prefix}{out}"
+                  except Exception:
+                      pass
+              return f"{prefix}{text[:70]}"
+
           def date_line(now):
               return f"📆{CN_MONTHS[now.month-1]}{CN_DAYS[now.day]}  {WEEKDAYS[now.weekday()]}"
 
-          def lunar_year_days(year):
-              info = LUNAR_INFO[year - 1900]
-              total = 348
-              for i in range(0x8000, 0x8, -1):
-                  if info & i:
-                      total += 1
-              return total + leap_days(year)
-
-          def leap_month(year):
-              return LUNAR_INFO[year - 1900] & 0xf
-
-          def leap_days(year):
-              lm = leap_month(year)
-              if lm:
-                  return 30 if (LUNAR_INFO[year - 1900] & 0x10000) else 29
-              return 0
-
-          def month_days(year, month):
-              return 30 if (LUNAR_INFO[year - 1900] & (0x10000 >> month)) else 29
-
-          def lunar_date_text(day):
-              # Lunar conversion is best-effort. Never let lunar data break the whole push.
-              try:
-                  offset = (day - date(1900, 1, 31)).days
-                  year = 1900
-                  while year < 2050 and year - 1900 < len(LUNAR_INFO) and offset >= lunar_year_days(year):
-                      offset -= lunar_year_days(year)
-                      year += 1
-                  if year - 1900 >= len(LUNAR_INFO):
-                      return ""
-                  lm = leap_month(year)
-                  is_leap = False
-                  month = 1
-                  while month <= 12:
-                      md = leap_days(year) if is_leap else month_days(year, month)
-                      if offset < md:
-                          break
-                      offset -= md
-                      if lm == month and not is_leap:
-                          is_leap = True
-                      else:
-                          if is_leap:
-                              is_leap = False
-                          month += 1
-                  if month < 1 or month >= len(LUNAR_MONTHS) or offset + 1 < 1 or offset + 1 >= len(LUNAR_DAYS):
-                      return ""
-                  prefix = "闰" if is_leap else ""
-                  return f"农历{prefix}{LUNAR_MONTHS[month]}{LUNAR_DAYS[offset + 1]}"
-              except Exception as e:
-                  print("农历计算失败：", str(e)[:200])
-                  return ""
-
           def solar_term_for_day(day):
               year = day.year
-              base = datetime(1900, 1, 6, 2, 5, tzinfo=BEIJING)
+              base = datetime(1900, 1, 6, 2, 5, tzinfo=timezone.utc)
               for i, name in enumerate(SOLAR_TERM_NAMES):
                   minutes = 525948.76 * (year - 1900) + SOLAR_TERM_INFO[i]
-                  term_day = (base + timedelta(minutes=minutes)).date()
+                  term_day = (base + timedelta(minutes=minutes)).astimezone(BEIJING).date()
                   diff = (term_day - day).days
                   if diff == 0:
                       return f"今天是{name}"
@@ -215,21 +181,24 @@ jobs:
               if pm25 <= 75: return "PM2.5偏高，敏感人群注意"
               return "PM2.5较高，建议减少户外暴露"
 
-          def weather_air_item(day_offset=0):
-              url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max&current=wind_speed_10m&timezone=Asia%2FShanghai&forecast_days=2"
+          def weather_air_item():
+              url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset&current=wind_speed_10m&timezone=Asia%2FShanghai&forecast_days=2"
               try:
                   obj = json.loads(http_get(url, timeout=20))
                   d = obj.get("daily", {})
-                  idx = day_offset
-                  code = int((d.get("weather_code") or [3,3])[idx])
+                  code = int((d.get("weather_code") or [3])[0])
                   desc = WEATHER_CODES.get(code, "天气待查")
-                  high = round(float((d.get("temperature_2m_max") or [0,0])[idx]))
-                  low = round(float((d.get("temperature_2m_min") or [0,0])[idx]))
-                  pop = (d.get("precipitation_probability_max") or [None,None])[idx]
-                  uv = (d.get("uv_index_max") or [None,None])[idx]
+                  high = round(float((d.get("temperature_2m_max") or [0])[0]))
+                  low = round(float((d.get("temperature_2m_min") or [0])[0]))
+                  pop = (d.get("precipitation_probability_max") or [None])[0]
+                  uv = (d.get("uv_index_max") or [None])[0]
+                  sunrise = (d.get("sunrise") or [""])[0][-5:]
+                  sunset = (d.get("sunset") or [""])[0][-5:]
+                  t_code = int((d.get("weather_code") or [3,3])[1])
+                  t_desc = WEATHER_CODES.get(t_code, "天气待查")
+                  t_high = round(float((d.get("temperature_2m_max") or [0,0])[1]))
+                  t_low = round(float((d.get("temperature_2m_min") or [0,0])[1]))
                   advice = "建议带伞" if code in [51,53,55,61,63,65,80,81,82,95] or (pop is not None and int(pop) >= 50) else "适合正常出行"
-                  if day_offset == 1:
-                      return f"明天天气：杭州{desc}，{low}℃～{high}℃，{advice}"
                   air = ""
                   try:
                       aq = json.loads(http_get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=30.2741&longitude=120.1551&current=pm2_5,us_aqi&timezone=Asia%2FShanghai", timeout=15)).get("current", {})
@@ -242,16 +211,14 @@ jobs:
                   extra = []
                   if pop is not None: extra.append(f"降水概率{int(pop)}%")
                   if uv is not None: extra.append(f"紫外线{round(float(uv), 1)}（{uv_note(uv)}）")
-                  return f"天气空气：今天杭州{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extra) if extra else "") + air + f"；{weather_air_item(1)}"
+                  if sunrise and sunset: extra.append(f"日出{sunrise}，日落{sunset}")
+                  return f"天气空气：今天杭州{desc}，{low}℃～{high}℃，{advice}" + ("，" + "，".join(extra) if extra else "") + air + f"；明天{t_desc}，{t_low}℃～{t_high}℃"
               except Exception:
                   return "天气空气：杭州天气暂时获取失败"
 
           def calendar_item(now):
               today = now.date()
               bits = []
-              lunar = lunar_date_text(today)
-              if lunar:
-                  bits.append(lunar)
               st = solar_term_for_day(today)
               if st: bits.append(st)
               for name, day in HOLIDAYS_2026:
@@ -262,25 +229,78 @@ jobs:
                       break
               if now.weekday() == 6: bits.append("今天是周日，明天工作日")
               elif now.weekday() == 4: bits.append("今天是周五，周末前最后一个工作日")
-              return "日历：" + "；".join(bits)
+              return "日历节气：" + "；".join(bits) if bits else "日历节气：今天暂无特殊节气或节假日提醒"
 
-          def history_item(now):
+          def wiki_current_events(now, limit=3):
+              items = []
+              for delta in [0, -1]:
+                  day = now + timedelta(days=delta)
+                  page = f"Portal:Current events/{day.year} {day.strftime('%B')} {day.day}"
+                  url = "https://en.wikipedia.org/w/api.php?" + urllib.parse.urlencode({"action":"parse","page":page,"prop":"text","format":"json","formatversion":"2"})
+                  try:
+                      obj = json.loads(http_get(url, timeout=20))
+                      html_text = obj.get("parse", {}).get("text", "")
+                      chunks = re.findall(r"<li>(.*?)</li>", html_text, flags=re.S)
+                      for raw in chunks:
+                          text = clean(raw)
+                          if not text or len(text) < 35 or len(text) > 240:
+                              continue
+                          if any(x in text.lower() for x in ["sports", "football", "cricket", "death", "dies at"]):
+                              continue
+                          item = summarize_wiki(text, "维基当前事件：")
+                          if mark_once("current_event", item):
+                              items.append(item)
+                          if len(items) >= limit:
+                              return items
+                  except Exception as e:
+                      print("维基当前事件失败：", str(e)[:200])
+              return items
+
+          def wiki_on_this_day(now, limit=3):
+              items = []
               try:
                   obj = json.loads(http_get(f"https://zh.wikipedia.org/api/rest_v1/feed/onthisday/events/{now.month}/{now.day}", timeout=20))
-                  candidates = []
+                  old_first = []
+                  rest = []
                   for ev in obj.get("events", []):
                       text = clean(ev.get("text"))
                       year = ev.get("year")
-                      if not text or len(text) > 95 or any(x in text for x in ["出生", "逝世"]):
+                      if not text or len(text) > 120 or any(x in text for x in ["出生", "逝世"]):
                           continue
+                      item = f"历史：{year}年，{text}"
                       if isinstance(year, int) and year <= now.year - 50:
-                          candidates.append(f"历史：{year}年，{text}")
-                  for item in candidates + [f"历史：{clean(ev.get('year'))}年，{clean(ev.get('text'))}" for ev in obj.get("events", []) if clean(ev.get("text"))]:
+                          old_first.append(item)
+                      else:
+                          rest.append(item)
+                  for item in old_first + rest:
                       if mark_once("history", item):
-                          return item
-              except Exception:
-                  pass
-              return "历史：今天没有抓到合适的远年事件"
+                          items.append(item)
+                      if len(items) >= limit:
+                          return items
+              except Exception as e:
+                  print("历史上的今天失败：", str(e)[:200])
+              return items
+
+          def wiki_random_items(limit=5):
+              items = []
+              bad = ["消歧义", "列表", "年", "月", "日", "行政区", "道路", "车站", "村", "河流"]
+              for _ in range(limit * 4):
+                  try:
+                      obj = json.loads(http_get("https://zh.wikipedia.org/api/rest_v1/page/random/summary", timeout=15))
+                      title = clean(obj.get("title"))
+                      extract = clean(obj.get("extract"))
+                      if not title or not extract or len(extract) < 55:
+                          continue
+                      if len(title) <= 1 or len(title) > 24 or any(x in title for x in bad):
+                          continue
+                      item = summarize_wiki(f"{title}：{extract}", "百科：")
+                      if mark_once("wiki_random", item):
+                          items.append(item)
+                      if len(items) >= limit:
+                          return items
+                  except Exception:
+                      continue
+              return items
 
           def parse_pubdate(text):
               try:
@@ -290,25 +310,10 @@ jobs:
               except Exception:
                   return None
 
-          def tech_item(now):
-              keywords = ["release","launch","announce","security","model","update","发布","推出","上线","安全","模型","更新"]
-              for name, url in TECH_RSS:
-                  try:
-                      root = ET.fromstring(http_get(url, timeout=18))
-                      for item in root.findall(".//item")[:8]:
-                          title = clean(item.findtext("title"))
-                          pub = parse_pubdate(item.findtext("pubDate"))
-                          if pub and now - pub > timedelta(days=14): continue
-                          if title and len(title) <= 110 and any(k.lower() in title.lower() for k in keywords):
-                              return f"科技：{name} 官方更新，{title}"
-                  except Exception:
-                      continue
-              return "科技：今天没有抓到值得单独提醒的官方大更新"
-
           def football_items(now, limit=2):
               items, seen = [], set()
               for label, league in FOOTBALL_LEAGUES:
-                  for delta in [-1,0,1]:
+                  for delta in [-1,0,1,2]:
                       day = (now + timedelta(days=delta)).strftime("%Y%m%d")
                       url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard?dates={day}"
                       try:
@@ -328,167 +333,62 @@ jobs:
                               key = f"{label}{an}{hn}{day}"
                               if key in seen: continue
                               seen.add(key)
-                              if state == "post" and hs is not None and ass is not None: items.append(f"{label} {an} {ass}-{hs} {hn}")
-                              elif state == "pre": items.append(f"{label} {an} vs {hn}，{detail}")
-                              else: items.append(f"{label} {an} {ass or ''}-{hs or ''} {hn}，{detail}")
+                              if state == "post" and hs is not None and ass is not None:
+                                  items.append(f"足球：{label} {an} {ass}-{hs} {hn}")
+                              elif state == "pre":
+                                  items.append(f"足球：{label} {an} vs {hn}，{detail}")
+                              else:
+                                  items.append(f"足球：{label} {an} {ass or ''}-{hs or ''} {hn}，{detail}")
                               if len(items) >= limit: return items
                       except Exception:
                           continue
-              return items or ["今天暂未抓到重点比赛赛程或比分"]
+              return items
 
           def steam_item():
               try:
                   obj = json.loads(http_get("https://store.steampowered.com/api/featuredcategories?cc=cn&l=schinese", timeout=18))
-                  names = [clean(x.get("name")) for x in obj.get("top_sellers", {}).get("items", []) if clean(x.get("name"))][:3]
+                  names = []
+                  for x in obj.get("top_sellers", {}).get("items", []):
+                      name = clean(x.get("name")).strip("《》")
+                      if name: names.append(name)
+                      if len(names) >= 3: break
                   if names: return f"游戏：Steam 热销榜前列包括《{'》《'.join(names)}》"
               except Exception:
                   pass
-              return "游戏：Steam 热销榜暂时获取失败"
+              return None
 
-          def online_movie_item():
-              try:
-                  obj = json.loads(http_get("https://rss.applemarketingtools.com/api/v2/us/movies/top-movies/all/25/explicit.json", timeout=18))
-                  for x in obj.get("feed", {}).get("results", []):
-                      name = clean(x.get("name"))
-                      genre = clean((x.get("genres") or [{}])[0].get("name"))
-                      if name and mark_once("movie", name):
-                          return f"电影：Apple 电影榜推荐《{name}》，类型：{genre or '电影'}"
-              except Exception:
-                  pass
-              return "电影：今日电影榜暂时获取失败"
-
-          def online_book_item():
-              try:
-                  obj = json.loads(http_get("https://openlibrary.org/trending/daily.json", timeout=18))
-                  for x in obj.get("works", [])[:30]:
-                      title = clean(x.get("title"))
-                      authors = ", ".join(clean(a.get("name")) for a in x.get("author_name", [])[:2]) if isinstance(x.get("author_name"), list) else ""
-                      if title and mark_once("book", title):
-                          return f"好书：Open Library 趋势书《{title}》" + (f"，作者 {authors}" if authors else "")
-              except Exception:
-                  pass
-              return "好书：今日趋势书暂时获取失败"
-
-          def quote_item():
-              try:
-                  obj = json.loads(http_get("https://api.quotable.io/random?maxLength=80", timeout=15))
-                  quote = clean(obj.get("content"))
-                  author = clean(obj.get("author"))
-                  item = f"摘抄：{quote}——{author}"
-                  if quote and mark_once("quote", item): return item
-              except Exception:
-                  pass
-              return "摘抄：今天没有抓到合适的短句"
-
-          def science_item():
-              try:
-                  obj = json.loads(http_get("https://zh.wikipedia.org/api/rest_v1/page/random/summary", timeout=15))
-                  title = clean(obj.get("title"))
-                  extract = clean(obj.get("extract"))
-                  if title and extract and len(extract) > 30:
-                      text = extract[:90].rstrip("，。；;") + "。"
-                      if mark_once("science", title):
-                          return f"科普：{title}——{text}"
-              except Exception:
-                  pass
-              return "科普：今天的随机百科暂时获取失败"
-
-          def yesterday_hot_item():
-              urls = ["https://api-hot.imsyy.top/baidu","https://api-hot.imsyy.top/toutiao","https://api-hot.imsyy.top/weibo","https://api-hot.imsyy.top/zhihu"]
-              bad = ["股票","股价","财报","广告","直播","彩票","星座","美女","网红","八卦","开播","抽奖","第几","多少","为何","一文读懂"]
-              def walk(obj):
-                  if isinstance(obj, dict):
-                      for key in ["title","name","word","desc","hot_word","keyword"]:
-                          if isinstance(obj.get(key), str): yield obj[key]
-                      for v in obj.values(): yield from walk(v)
-                  elif isinstance(obj, list):
-                      for v in obj: yield from walk(v)
-              for url in urls:
+          def tech_item(now):
+              keywords = ["release","launch","announce","security","model","update","发布","推出","上线","安全","模型","更新"]
+              for name, url in TECH_RSS:
                   try:
-                      obj = json.loads(http_get(url, timeout=15))
-                      for raw in walk(obj):
-                          title = clean(raw)
-                          if 8 <= len(title) <= 60 and not any(x in title for x in bad) and mark_once("hot", title):
-                              return f"昨日热点：{title}"
+                      root = ET.fromstring(http_get(url, timeout=18))
+                      for item in root.findall(".//item")[:8]:
+                          title = clean(item.findtext("title"))
+                          pub = parse_pubdate(item.findtext("pubDate"))
+                          if pub and now - pub > timedelta(days=14): continue
+                          if title and len(title) <= 110 and any(k.lower() in title.lower() for k in keywords):
+                              return f"科技：{name} 官方更新，{translate_short(title)}"
                   except Exception:
                       continue
               return None
 
-          def info_gap_item(now):
-              prompt = f"请写一条适合年轻人的“今日信息差”，必须具体、实用、非鸡汤，30字以内。今天日期：{now.strftime('%Y-%m-%d')}。只输出一句中文。"
-              if SILICONFLOW_API_KEY:
-                  try:
-                      raw = post_json(SILICONFLOW_URL, {"model":SILICONFLOW_MODEL,"messages":[{"role":"user","content":prompt}],"temperature":0.4,"max_tokens":100}, timeout=60, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
-                      text = clean(json.loads(raw)["choices"][0]["message"]["content"])
-                      if text and mark_once("info_gap", text):
-                          return "今日信息差：" + text
-                  except Exception:
-                      pass
-              return "今日信息差：重要 App 的自动续费最好开通后立刻设置取消提醒"
-
-          def english_item(now):
-              if SILICONFLOW_API_KEY:
-                  try:
-                      prompt = f"给一个今天可用的实用英语短句，格式：英语 / 中文。不要名言，不要鸡汤。日期：{now.strftime('%Y-%m-%d')}。"
-                      raw = post_json(SILICONFLOW_URL, {"model":SILICONFLOW_MODEL,"messages":[{"role":"user","content":prompt}],"temperature":0.3,"max_tokens":100}, timeout=60, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
-                      text = clean(json.loads(raw)["choices"][0]["message"]["content"])
-                      if text and mark_once("english", text):
-                          return "英语：" + text
-                  except Exception:
-                      pass
-              return "英语：Could you give me a quick update? / 你能快速同步一下进展吗？"
-
-          def life_item(now):
-              if SILICONFLOW_API_KEY:
-                  try:
-                      prompt = f"写一条城市生活小建议，具体实用，不要鸡汤，35字以内。日期：{now.strftime('%Y-%m-%d')}。"
-                      raw = post_json(SILICONFLOW_URL, {"model":SILICONFLOW_MODEL,"messages":[{"role":"user","content":prompt}],"temperature":0.4,"max_tokens":100}, timeout=60, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
-                      text = clean(json.loads(raw)["choices"][0]["message"]["content"])
-                      if text and mark_once("life", text):
-                          return "生活：" + text
-                  except Exception:
-                      pass
-              return "生活：雨天通勤包里放一双薄袜子，比临时找纸巾更实用"
-
-          def translate_items(items):
-              if not SILICONFLOW_API_KEY: return items
-              payload = {"model":SILICONFLOW_MODEL,"messages":[{"role":"system","content":"你是中文晨报编辑。只输出JSON数组。把英文翻译成自然中文；保留比分、书名、片名、游戏名和事实；不要添加新事实。"},{"role":"user","content":json.dumps(items, ensure_ascii=False)}],"temperature":0.1,"max_tokens":1800}
-              try:
-                  raw = post_json(SILICONFLOW_URL, payload, timeout=90, headers={"Authorization":f"Bearer {SILICONFLOW_API_KEY}"})
-                  text = json.loads(raw)["choices"][0]["message"]["content"].strip()
-                  m = re.search(r"\[[\s\S]*\]", text)
-                  data = json.loads(m.group(0) if m else text)
-                  if isinstance(data, list) and len(data) == len(items): return [clean(x) for x in data]
-              except Exception as e:
-                  print("中文化失败：", str(e)[:300])
-              return items
-
           def build_content():
               now = datetime.now(BEIJING)
-              football = football_items(now, 2)
-              items = [
-                  weather_air_item(0),
-                  calendar_item(now),
-                  history_item(now),
-                  "足球：" + "；".join(football),
-                  steam_item(),
-                  tech_item(now),
-              ]
-              hot = yesterday_hot_item()
-              if hot: items.append(hot)
-              items.extend([
-                  info_gap_item(now),
-                  online_movie_item(),
-                  online_book_item(),
-                  quote_item(),
-                  science_item(),
-                  english_item(now),
-                  life_item(now),
-                  "明日看点：" + weather_air_item(1),
-              ])
-              items = translate_items(items)
+              items = [weather_air_item(), calendar_item(now)]
+              items.extend(wiki_current_events(now, 3))
+              items.extend(wiki_on_this_day(now, 3))
+              items.extend(wiki_random_items(5))
+              items.extend(football_items(now, 2))
+              for optional in [steam_item(), tech_item(now)]:
+                  if optional: items.append(optional)
+              # Deduplicate exact text while preserving order.
+              seen, final = set(), []
+              for item in items:
+                  if not item or item in seen: continue
+                  seen.add(item)
+                  final.append(item)
               lines = ["每日轻量晨报", date_line(now)]
-              for i, item in enumerate(items[:15], 1):
+              for i, item in enumerate(final[:15], 1):
                   lines.append(f"{i}、{item}；")
               return "\n".join(lines)
 
@@ -498,7 +398,7 @@ jobs:
               print(raw)
               if json.loads(raw).get("errcode") != 0: raise RuntimeError("企业微信返回失败：" + raw)
 
-          print("脚本版本：light-brief-v8-longrun")
+          print("脚本版本：light-brief-v10-wiki")
           content = build_content()
           print(content)
           send_wecom(content)
