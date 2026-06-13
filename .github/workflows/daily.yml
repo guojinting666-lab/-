@@ -71,6 +71,10 @@ jobs:
               "关键矿产法案", "最具幸福感城市调查", "绿色增长研究所", "阿尔及尔办事处", "新能源MPV市场",
               "腾势D9升级焕新", "ASIC市场或迎巨变", "芯片市场动荡", "协商民主实践中心", "活动周启动",
               "国际学术研讨会", "上合组织25周年", "渗透率破61%", "动力替代", "全生态重构",
+              "股票股价", "股价", "SH603501", "00700", "09880", "股票", "港股", "A股", "美股",
+              "投融界", "征信日", "浙商银行", "杭州分行", "普及金融知识", "金融权益", "信用生态",
+              "八面来风", "手机新浪网", "心动目的地战略", "鲜活出圈", "金融+体育", "促消费见实效",
+              "习近平外交文选", "主要篇目介绍", "学习出版社", "中央文献出版社",
           ]
           VAGUE_WORDS = [
               "新趋势", "新动态", "新平台", "新视角", "新策略", "新风尚", "新突破", "新挑战", "反思", "布局",
@@ -87,6 +91,7 @@ jobs:
               "杭州本地": 1,
               "热点": 2,
           }
+          SEARCH_EXCLUDES = " -股票 -股价 -财报 -证券 -银行 -征信 -投融界 -新浪 -习近平外交文选 -研讨会 -论坛 -活动周 -发布会"
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
@@ -120,6 +125,7 @@ jobs:
               text = re.sub(r"<[^>]+>", "", text)
               text = re.sub(r'^\{?\s*"?id"?\s*[:：]?\s*\d+\s*,?\s*"?title"?\s*[:：]?\s*', "", text)
               text = re.sub(r'"\s*\}?$', "", text)
+              text = re.sub(r"\((SH|SZ|HK|NASDAQ|NYSE)?\d{4,6}\)", "", text, flags=re.I)
               text = re.sub(r"^\s*[A-Za-z0-9]+[\.\)、\-\s]*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
               text = re.sub(r"[_｜|].*?(新闻|资讯|官网|客户端).*$", "", text)
@@ -180,6 +186,7 @@ jobs:
               })
 
           def rss_urls(query):
+              query = query + SEARCH_EXCLUDES
               google = "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q": query + " when:7d", "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"})
               bing = "https://www.bing.com/news/search?" + urllib.parse.urlencode({"q": query, "format": "rss", "setlang": "zh-CN", "cc": "cn"})
               return [google, bing]
@@ -278,6 +285,10 @@ jobs:
               if len(title) < 14 or len(title) > 90:
                   return False
               if any(word in title for word in BAD_WORDS + VAGUE_WORDS):
+                  return False
+              if re.search(r"股票股价|\([A-Z]{0,6}\d{4,6}\)|\d{5,6}\)股票|手机新浪网|_手机新浪网", title, re.I):
+                  return False
+              if re.search(r"(银行|证券|投融界|征信|金融知识|金融权益|股价|财报|减持|营收|利润|电话会议)", title):
                   return False
               if re.search(r"(将于\d{2}月\d{2}日|发布\d{4}年|第[一二三四]季度|同比增长|营业收入|净利润|每股|目标价)", title):
                   return False
@@ -416,10 +427,10 @@ jobs:
                   "2. 每条一眼看懂，必须包含具体主体、动作、结果。禁止写栏目式、评论式、趋势式空标题。",
                   "3. 不要足球新闻，除非它是当天全网级重大事件。",
                   "4. 不要低信息标题：为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜。",
-                  "5. 不要来源、链接、日期、评论数、括号媒体名；不要财报、股市、证券研报、投行路演、高管减持、公司电话会议。",
+                  "5. 不要来源、链接、日期、评论数、括号媒体名；不要股票股价页、财报、股市、证券研报、投行路演、高管减持、银行宣传、公司电话会议。",
                   "6. 不要把开头写成“新闻；”。不要使用 A/B/C 或 E/F/G 编号。",
                   "7. 必须选择候选新闻里的真实编号，不允许凭空编新闻。优先选择最近 24 小时；不够时最多放宽到最近 3 天；明显过时的不要选。",
-                  "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足、像广告软文、会议通稿、资本市场公告，就不要选。",
+                  "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足、像广告软文、会议通稿、资本市场公告、栏目页、出版物介绍，就不要选。",
                   "9. 优先选择年轻人会关心的内容：公共政策、城市生活、科技产品、AI/数码、出行消费、电影音乐演出、国际大事。",
                   "候选新闻：",
                   build_candidate_text(candidates),
@@ -470,7 +481,7 @@ jobs:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
           now = datetime.now(BEIJING)
-          print("脚本版本：v12")
+          print("脚本版本：v13")
           weather = hangzhou_weather()
           candidates = sort_candidates(fetch_hot(fetch_rss(now))["items"])
           print(f"候选新闻数量：{len(candidates)}")
