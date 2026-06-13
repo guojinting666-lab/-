@@ -68,11 +68,15 @@ jobs:
               "美好生活大调查", "全民情绪消费", "产业链应用链",
               "财报", "一季度", "Q1", "盘后", "分析师", "预测", "证券报", "投行", "路演", "高管", "减持",
               "套现", "股东", "营收", "利润", "电话会议", "影响力100强", "重点行业10强", "宣布调价",
+              "关键矿产法案", "最具幸福感城市调查", "绿色增长研究所", "阿尔及尔办事处", "新能源MPV市场",
+              "腾势D9升级焕新", "ASIC市场或迎巨变", "芯片市场动荡", "协商民主实践中心", "活动周启动",
+              "国际学术研讨会", "上合组织25周年", "渗透率破61%", "动力替代", "全生态重构",
           ]
           VAGUE_WORDS = [
               "新趋势", "新动态", "新平台", "新视角", "新策略", "新风尚", "新突破", "新挑战", "反思", "布局",
               "专栏", "看世界", "战略自主", "中心地位", "宏观", "启示", "观察：", "评论：", "例行记者会",
-              "时代来了", "直面", "还有多远", "关要闯", "新篇", "聚势", "融汇未来",
+              "时代来了", "直面", "还有多远", "关要闯", "新篇", "聚势", "融汇未来", "助力全球",
+              "市场火爆", "或迎巨变", "全球治理新作为", "新使命",
           ]
           CATEGORY_QUOTA = {
               "国内民生": 3,
@@ -189,7 +193,9 @@ jobs:
                               root = ET.fromstring(http_get(url))
                               for item in root.findall(".//item")[:50]:
                                   pub = parse_pubdate(item.findtext("pubDate"))
-                                  if pub and not (now - timedelta(days=5) <= pub <= now + timedelta(minutes=30)):
+                                  if not pub:
+                                      continue
+                                  if not (now - timedelta(days=3) <= pub <= now + timedelta(minutes=30)):
                                       continue
                                   add_candidate(store, item.findtext("title"), category, pub)
                           except Exception:
@@ -200,7 +206,9 @@ jobs:
               score = 0
               title = item["title"]
               if item["time"]:
-                  score += 30
+                  score += 60
+              else:
+                  score -= 15
               if is_good_title(title):
                   score += 20
               if any(x in title for x in ["宣布", "发布", "上线", "通过", "签署", "启动", "下调", "上调", "增长", "下降", "开通", "暂停", "召回", "定档"]):
@@ -208,7 +216,7 @@ jobs:
               if re.search(r"\d|%|％|万|亿|℃", title):
                   score += 8
               if any(word in title for word in BAD_WORDS + VAGUE_WORDS):
-                  score -= 50
+                  score -= 100
               return score
 
           def sort_candidates(candidates):
@@ -410,8 +418,8 @@ jobs:
                   "4. 不要低信息标题：为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜。",
                   "5. 不要来源、链接、日期、评论数、括号媒体名；不要财报、股市、证券研报、投行路演、高管减持、公司电话会议。",
                   "6. 不要把开头写成“新闻；”。不要使用 A/B/C 或 E/F/G 编号。",
-                  "7. 必须选择候选新闻里的真实编号，不允许凭空编新闻。优先选择最近 5 天的新消息，明显过时的不要选。",
-                  "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足、像广告软文或资本市场公告，就不要选。",
+                  "7. 必须选择候选新闻里的真实编号，不允许凭空编新闻。优先选择最近 24 小时；不够时最多放宽到最近 3 天；明显过时的不要选。",
+                  "8. 改写时保留原候选里的关键实体、数字、政策、产品名、地点、结果；如果原候选信息不足、像广告软文、会议通稿、资本市场公告，就不要选。",
                   "9. 优先选择年轻人会关心的内容：公共政策、城市生活、科技产品、AI/数码、出行消费、电影音乐演出、国际大事。",
                   "候选新闻：",
                   build_candidate_text(candidates),
@@ -462,7 +470,7 @@ jobs:
                   raise RuntimeError("企业微信返回失败：" + raw)
 
           now = datetime.now(BEIJING)
-          print("脚本版本：v10")
+          print("脚本版本：v12")
           weather = hangzhou_weather()
           candidates = sort_candidates(fetch_hot(fetch_rss(now))["items"])
           print(f"候选新闻数量：{len(candidates)}")
