@@ -147,27 +147,36 @@ jobs:
               return 30 if (LUNAR_INFO[year - 1900] & (0x10000 >> month)) else 29
 
           def lunar_date_text(day):
-              offset = (day - date(1900, 1, 31)).days
-              year = 1900
-              while year < 2050 and offset >= lunar_year_days(year):
-                  offset -= lunar_year_days(year)
-                  year += 1
-              lm = leap_month(year)
-              is_leap = False
-              month = 1
-              while month <= 12:
-                  md = leap_days(year) if is_leap else month_days(year, month)
-                  if offset < md:
-                      break
-                  offset -= md
-                  if lm == month and not is_leap:
-                      is_leap = True
-                  else:
-                      if is_leap:
-                          is_leap = False
-                      month += 1
-              prefix = "闰" if is_leap else ""
-              return f"农历{prefix}{LUNAR_MONTHS[month]}{LUNAR_DAYS[offset + 1]}"
+              # Lunar conversion is best-effort. Never let lunar data break the whole push.
+              try:
+                  offset = (day - date(1900, 1, 31)).days
+                  year = 1900
+                  while year < 2050 and year - 1900 < len(LUNAR_INFO) and offset >= lunar_year_days(year):
+                      offset -= lunar_year_days(year)
+                      year += 1
+                  if year - 1900 >= len(LUNAR_INFO):
+                      return ""
+                  lm = leap_month(year)
+                  is_leap = False
+                  month = 1
+                  while month <= 12:
+                      md = leap_days(year) if is_leap else month_days(year, month)
+                      if offset < md:
+                          break
+                      offset -= md
+                      if lm == month and not is_leap:
+                          is_leap = True
+                      else:
+                          if is_leap:
+                              is_leap = False
+                          month += 1
+                  if month < 1 or month >= len(LUNAR_MONTHS) or offset + 1 < 1 or offset + 1 >= len(LUNAR_DAYS):
+                      return ""
+                  prefix = "闰" if is_leap else ""
+                  return f"农历{prefix}{LUNAR_MONTHS[month]}{LUNAR_DAYS[offset + 1]}"
+              except Exception as e:
+                  print("农历计算失败：", str(e)[:200])
+                  return ""
 
           def solar_term_for_day(day):
               year = day.year
@@ -239,7 +248,10 @@ jobs:
 
           def calendar_item(now):
               today = now.date()
-              bits = [lunar_date_text(today)]
+              bits = []
+              lunar = lunar_date_text(today)
+              if lunar:
+                  bits.append(lunar)
               st = solar_term_for_day(today)
               if st: bits.append(st)
               for name, day in HOLIDAYS_2026:
@@ -486,7 +498,7 @@ jobs:
               print(raw)
               if json.loads(raw).get("errcode") != 0: raise RuntimeError("企业微信返回失败：" + raw)
 
-          print("脚本版本：light-brief-v7-longrun")
+          print("脚本版本：light-brief-v8-longrun")
           content = build_content()
           print(content)
           send_wecom(content)
