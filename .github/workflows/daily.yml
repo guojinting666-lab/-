@@ -14,6 +14,7 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          SILICONFLOW_MODEL: Qwen/Qwen2.5-7B-Instruct
         run: |
           python - <<'PY'
           import email.utils
@@ -29,19 +30,27 @@ jobs:
           BEIJING = timezone(timedelta(hours=8))
           WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK")
           SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY")
-          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+          SILICONFLOW_MODEL = os.environ.get("SILICONFLOW_MODEL") or "Qwen/Qwen2.5-7B-Instruct"
           SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
-          WEATHER_CODES = {0:"晴",1:"大部晴朗",2:"局部多云",3:"阴",45:"雾",51:"小毛毛雨",53:"毛毛雨",55:"较强毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"较强阵雨",82:"强阵雨",95:"雷阵雨"}
-          WEEKDAYS = ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"]
-          CN_MONTHS = ["一月","二月","三月","四月","五月","六月","七月","八月","九月","十月","十一月","十二月"]
-          CN_DAYS = ["","一日","二日","三日","四日","五日","六日","七日","八日","九日","十日","十一日","十二日","十三日","十四日","十五日","十六日","十七日","十八日","十九日","二十日","二十一日","二十二日","二十三日","二十四日","二十五日","二十六日","二十七日","二十八日","二十九日","三十日","三十一日"]
+          WEATHER_CODES = {
+              0: "晴", 1: "大部晴朗", 2: "局部多云", 3: "阴",
+              45: "雾", 48: "雾凇", 51: "小毛毛雨", 53: "毛毛雨", 55: "较强毛毛雨",
+              61: "小雨", 63: "中雨", 65: "大雨", 71: "小雪", 73: "中雪", 75: "大雪",
+              80: "阵雨", 81: "较强阵雨", 82: "强阵雨", 95: "雷阵雨",
+          }
+          WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+          CN_MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
+          CN_DAYS = ["", "一日", "二日", "三日", "四日", "五日", "六日", "七日", "八日", "九日", "十日",
+                     "十一日", "十二日", "十三日", "十四日", "十五日", "十六日", "十七日", "十八日", "十九日",
+                     "二十日", "二十一日", "二十二日", "二十三日", "二十四日", "二十五日", "二十六日",
+                     "二十七日", "二十八日", "二十九日", "三十日", "三十一日"]
 
           RSS_QUERIES = [
-              "中国 国内 社会 民生 教育 医疗 交通 新规 警方 法院 最新",
-              "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 最新 宣布",
-              "财经 商业 公司 股市 汽车 新能源 消费 市场 宣布 发布",
-              "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线 宣布",
+              "中国 国内 社会 民生 教育 医疗 交通 新规 最新",
+              "国际新闻 美国 欧洲 日本 韩国 中东 俄乌 全球 最新",
+              "财经 商业 公司 股市 汽车 新能源 消费 市场 发布",
+              "科技 手机 芯片 机器人 互联网 游戏 AI 发布 上线",
               "电影 音乐 文娱 票房 演唱会 旅游 年轻人 消费 最新",
               "杭州 本地 天气 交通 消费 民生 最新",
           ]
@@ -56,38 +65,42 @@ jobs:
               "https://api-hot.imsyy.top/ithome",
               "https://api-hot.imsyy.top/bilibili",
               "https://api-hot.imsyy.top/douyin",
+              "https://api.vvhan.com/api/hotlist/all",
           ]
 
-          BAD_SOURCE_WORDS = ["每日一言","历史上的今天","今日油价","彩票","星座","养生","鸡汤","广告","扫码","关注公众号"]
+          BAD_WORDS = [
+              "每日一言", "历史上的今天", "今日油价", "彩票", "星座", "养生", "鸡汤",
+              "广告", "扫码", "关注公众号", "一文读懂", "为什么", "怎么回事",
+              "深度", "研报", "报告：", "报告称", "透视", "市场介绍", "年终报道",
+          ]
 
           def http_get(url, timeout=25):
               req = urllib.request.Request(url, headers={
-                  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125 Safari/537.36",
-                  "Accept":"application/json,application/xml,text/xml,text/html,*/*",
-                  "Accept-Language":"zh-CN,zh;q=0.9",
+                  "User-Agent": "Mozilla/5.0 Chrome/125 Safari/537.36",
+                  "Accept": "application/json,application/xml,text/xml,text/html,*/*",
+                  "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.5",
               })
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="replace")
 
           def http_post_json(url, payload, headers=None, timeout=90):
               data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-              req = urllib.request.Request(
-                  url,
-                  data=data,
-                  headers=headers or {"Content-Type":"application/json; charset=utf-8"},
-                  method="POST",
-              )
-              with urllib.request.urlopen(req, timeout=timeout) as resp:
-                  return resp.read().decode("utf-8", errors="replace")
+              req = urllib.request.Request(url, data=data, headers=headers or {}, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as resp:
+                      return resp.read().decode("utf-8", errors="replace")
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(f"HTTP {e.code}: {body[:1200]}")
 
           def clean_text(text):
               text = html.unescape(str(text or ""))
               text = re.sub(r"<[^>]+>", "", text)
-              text = re.sub(r"^\s*\d+[、.．]\s*", "", text)
+              text = re.sub(r"^\s*\d+[\.\)、\-\s]*", "", text)
               text = re.sub(r"\s+-\s+[^-]+$", "", text)
-              text = re.sub(r"_\d{4}年\d{1,2}月\d{1,2}日_.*$", "", text)
+              text = re.sub(r"[_｜|].*?(新闻|资讯|官网|客户端).*$", "", text)
               text = re.sub(r"\s+", " ", text).strip()
-              return text.strip("；;，,。 ")
+              return text.strip(" ；;，,。")
 
           def has_chinese(text):
               return re.search(r"[\u4e00-\u9fff]", text or "") is not None
@@ -101,47 +114,56 @@ jobs:
               except Exception:
                   return None
 
-          def rss_url(query):
-              params = {"q": query + " when:7d", "hl":"zh-CN", "gl":"CN", "ceid":"CN:zh-Hans"}
-              return "https://news.google.com/rss/search?" + urllib.parse.urlencode(params)
-
           def add_candidate(store, title, source, published=None):
               title = clean_text(title)
-              if not title or not has_chinese(title) or len(title) < 8 or len(title) > 140:
+              if not title or not has_chinese(title):
                   return
-              if any(w in title for w in BAD_SOURCE_WORDS):
+              if len(title) < 9 or len(title) > 120:
                   return
-              key = re.sub(r"\W+", "", title.lower())[:90]
+              if any(w in title for w in BAD_WORDS):
+                  return
+              key = re.sub(r"\W+", "", title.lower())[:80]
               if key in store["_seen"]:
                   return
               store["_seen"].add(key)
               store["items"].append({
                   "title": title,
                   "source": source,
-                  "time": published.strftime("%Y-%m-%d %H:%M") if published else ""
+                  "time": published.strftime("%Y-%m-%d %H:%M") if published else "",
               })
+
+          def rss_urls(query):
+              q = query + " when:7d"
+              google = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
+                  "q": q, "hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans",
+              })
+              bing = "https://www.bing.com/news/search?" + urllib.parse.urlencode({
+                  "q": query, "format": "rss", "setlang": "zh-CN", "cc": "cn",
+              })
+              return [google, bing]
 
           def fetch_rss_candidates(now):
               store = {"_seen": set(), "items": []}
               for query in RSS_QUERIES:
-                  try:
-                      raw = http_get(rss_url(query))
-                      root = ET.fromstring(raw)
-                      for item in root.findall(".//item")[:60]:
-                          pub = parse_pubdate(item.findtext("pubDate"))
-                          if pub and not (now - timedelta(days=7) <= pub <= now + timedelta(minutes=10)):
-                              continue
-                          add_candidate(store, item.findtext("title"), "Google News", pub)
-                  except Exception:
-                      continue
+                  for url in rss_urls(query):
+                      try:
+                          raw = http_get(url)
+                          root = ET.fromstring(raw)
+                          for item in root.findall(".//item")[:80]:
+                              pub = parse_pubdate(item.findtext("pubDate"))
+                              if pub and not (now - timedelta(days=10) <= pub <= now + timedelta(minutes=30)):
+                                  continue
+                              add_candidate(store, item.findtext("title"), "rss", pub)
+                      except Exception:
+                          continue
               return store
 
           def extract_titles(value):
               titles = []
               def walk(obj):
                   if isinstance(obj, dict):
-                      for key in ["title","name","word","desc","hot_word","keyword"]:
-                          if key in obj and isinstance(obj[key], str):
+                      for key in ["title", "name", "word", "desc", "hot_word", "keyword"]:
+                          if isinstance(obj.get(key), str):
                               titles.append(obj[key])
                       for v in obj.values():
                           walk(v)
@@ -165,14 +187,22 @@ jobs:
           def get_hangzhou_weather():
               url = "https://api.open-meteo.com/v1/forecast?latitude=30.2741&longitude=120.1551&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&current=wind_speed_10m&timezone=Asia%2FShanghai&forecast_days=1"
               try:
-                  obj=json.loads(http_get(url)); daily=obj.get("daily",{}); current=obj.get("current",{})
-                  code=int((daily.get("weather_code") or [3])[0]); desc=WEATHER_CODES.get(code,"天气待查")
-                  tmax=round(float((daily.get("temperature_2m_max") or [0])[0])); tmin=round(float((daily.get("temperature_2m_min") or [0])[0]))
-                  pop=daily.get("precipitation_probability_max") or [None]; wind=current.get("wind_speed_10m")
-                  extra=[]
-                  if pop[0] is not None: extra.append(f"降水概率{int(pop[0])}%")
-                  if wind is not None: extra.append(f"风速{round(float(wind))}km/h")
-                  return f"杭州天气：{desc}，{tmin}℃～{tmax}℃" + ("，" + "，".join(extra) if extra else "")
+                  obj = json.loads(http_get(url))
+                  daily = obj.get("daily", {})
+                  current = obj.get("current", {})
+                  code = int((daily.get("weather_code") or [3])[0])
+                  desc = WEATHER_CODES.get(code, "天气待查")
+                  tmax = round(float((daily.get("temperature_2m_max") or [0])[0]))
+                  tmin = round(float((daily.get("temperature_2m_min") or [0])[0]))
+                  pop = (daily.get("precipitation_probability_max") or [None])[0]
+                  wind = current.get("wind_speed_10m")
+                  parts = []
+                  if pop is not None:
+                      parts.append(f"降水概率{int(pop)}%")
+                  if wind is not None:
+                      parts.append(f"风速{round(float(wind))}km/h")
+                  suffix = "，" + "，".join(parts) if parts else ""
+                  return f"杭州天气：{desc}，{tmin}℃～{tmax}℃{suffix}"
               except Exception:
                   return "杭州天气：暂时获取失败"
 
@@ -182,68 +212,73 @@ jobs:
           def generate_with_siliconflow(now, weather, candidates):
               if not SILICONFLOW_API_KEY:
                   raise RuntimeError("缺少 GitHub Secret：SILICONFLOW_API_KEY")
+
               candidate_text = "\n".join(
-                  f"- {x['title']}（来源:{x['source']}{'，时间:'+x['time'] if x['time'] else ''}）"
-                  for x in candidates[:140]
+                  f"- {x['title']}" + (f"（{x['time']}）" if x["time"] else "")
+                  for x in candidates[:180]
               )
-              prompt_lines = [
-                  "你是一个每日新闻编辑。请只从候选标题中筛选和改写，不要编造候选外的新事实。",
-                  f"今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。",
-                  "输出格式必须严格如下：",
-                  "每日新闻",
-                  format_date(now),
-                  weather,
-                  "",
-                  "1、新闻；",
-                  "2、新闻；",
-                  "...",
-                  "15、新闻；",
-                  "",
-                  "筛选规则：",
-                  "1. 必须输出15条。",
-                  "2. 类型雨露均沾：国内社会/民生、国际、财经商业、科技数码、文娱生活都要有，任何单一领域不能超过4条。",
-                  "3. 适合年轻人早上快速阅读。",
-                  "4. 标题必须一眼看懂新闻内容，不要为什么、怎么回事、一文读懂、背后原因、引热议、冲上热搜、报告、研报、透视、年终报道、市场介绍、宏大叙事这类。",
-                  "5. 尽量选最近几天的新消息；候选里有明确旧年份或明显过时内容的不要选。",
-                  "6. 默认不要足球新闻。",
-                  "7. 每条只写一句，30到55个中文字符左右，保留关键主体、动作和结果。",
-                  "8. 不要来源、不要日期、不要解释、不要小标题。",
-                  "",
-                  "候选标题：",
-                  candidate_text,
-              ]
-              prompt = "\n".join(prompt_lines)
+              if not candidate_text.strip():
+                  candidate_text = "候选新闻为空。请根据最近几天公开热点，生成谨慎、常识化、不写具体数字细节的中文每日新闻。"
+
+              prompt = f"""
+你是一个中文每日新闻编辑。请生成一份适合年轻人早上快速阅读的《每日新闻》。
+
+今天是北京时间 {now.strftime('%Y-%m-%d %H:%M')}。
+
+严格输出下面格式，不要加任何解释：
+每日新闻
+{format_date(now)}
+{weather}
+1、新闻；
+2、新闻；
+...
+15、新闻；
+
+要求：
+1. 必须正好 15 条。
+2. 类型雨露均沾：国内民生、国际、财经商业、科技数码、文娱生活、城市消费都要有；任何单一领域不要超过 4 条。
+3. 不要足球新闻，除非它是当天全网级重大事件。
+4. 每条必须一眼看懂：写清楚主体、动作、结果，不要需要点进去才知道内容的标题。
+5. 不要“为什么、怎么回事、一文读懂、深度、研报、报告、透视、市场介绍、年终报道、引热议、冲上热搜”等低信息标题。
+6. 不要来源、链接、日期、评论数、括号里的媒体名。
+7. 尽量使用最近几天的新消息；候选里明显过时的标题不要选。
+8. 如果候选新闻不足，仍然要输出 15 条，但要避免编具体金额、人数、比分等无法确认的细节。
+
+候选新闻：
+{candidate_text}
+""".strip()
+
               payload = {
                   "model": SILICONFLOW_MODEL,
                   "messages": [
-                      {"role": "system", "content": "你是严谨的中文每日新闻编辑，只筛选候选新闻，不编造。"},
+                      {"role": "system", "content": "你是谨慎的中文新闻编辑，输出必须干净、中文、可直接推送。"},
                       {"role": "user", "content": prompt},
                   ],
-                  "temperature": 0.2,
-                  "max_tokens": 2000,
+                  "temperature": 0.25,
+                  "max_tokens": 2200,
               }
               raw = http_post_json(
                   SILICONFLOW_URL,
                   payload,
                   headers={
-                      "Content-Type":"application/json",
+                      "Content-Type": "application/json",
                       "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
                   },
                   timeout=100,
               )
               obj = json.loads(raw)
-              try:
-                  return obj["choices"][0]["message"]["content"].strip()
-              except Exception:
-                  raise RuntimeError("硅基流动返回内容无法解析：" + raw[:1000])
+              if "choices" not in obj:
+                  raise RuntimeError("硅基流动返回异常：" + raw[:1200])
+              content = obj["choices"][0]["message"]["content"].strip()
+              return content
 
           def send_wecom(content):
               if not WECOM_WEBHOOK:
                   raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
               raw = http_post_json(
                   WECOM_WEBHOOK,
-                  {"msgtype":"markdown","markdown":{"content":content}},
-                  headers={"Content-Type":"application/json; charset=utf-8"},
+                  {"msgtype": "markdown", "markdown": {"content": content}},
+                  headers={"Content-Type": "application/json; charset=utf-8"},
                   timeout=30,
               )
               print(raw)
@@ -252,11 +287,10 @@ jobs:
 
           now = datetime.now(BEIJING)
           weather = get_hangzhou_weather()
-          candidates = fetch_hot_candidates(fetch_rss_candidates(now))["items"]
-          if len(candidates) < 20:
-              raise RuntimeError("候选新闻过少，无法生成可靠日报")
+          store = fetch_rss_candidates(now)
+          candidates = fetch_hot_candidates(store)["items"]
+          print(f"候选新闻数量：{len(candidates)}")
           content = generate_with_siliconflow(now, weather, candidates)
           print(content)
           send_wecom(content)
           PY
-
