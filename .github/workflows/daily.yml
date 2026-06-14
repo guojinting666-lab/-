@@ -1,9 +1,12 @@
-name: Daily Light Brief Test Every 5 Minutes
+name: Daily Light Brief
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   schedule:
-    # Temporary test: run every 5 minutes. Disable after confirming schedule works.
+    # Diagnostic test: run every 5 minutes. Disable after confirming schedule works.
     - cron: "*/5 * * * *"
 
 jobs:
@@ -229,7 +232,7 @@ jobs:
                       time.sleep(8 * attempt)
               raise RuntimeError("企业微信发送失败：" + str(last_error))
 
-          print("SCRIPT_VERSION: light-brief-v15-test-every5")
+          print("SCRIPT_VERSION: light-brief-v17-diagnostic-push-schedule")
           content = build_content()
           print(content)
           send_wecom(content)
