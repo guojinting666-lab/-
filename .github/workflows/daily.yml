@@ -1,10 +1,10 @@
-name: Daily Light Brief
+name: Daily Light Brief Test Every 5 Minutes
 
 on:
   workflow_dispatch:
   schedule:
-    # 00:00 UTC = 08:00 Beijing time
-    - cron: "0 0 * * *"
+    # Temporary test: run every 5 minutes. Disable after confirming schedule works.
+    - cron: "*/5 * * * *"
 
 jobs:
   send-brief:
@@ -229,7 +229,7 @@ jobs:
                       time.sleep(8 * attempt)
               raise RuntimeError("企业微信发送失败：" + str(last_error))
 
-          print("SCRIPT_VERSION: light-brief-v15-simple-weather")
+          print("SCRIPT_VERSION: light-brief-v15-test-every5")
           content = build_content()
           print(content)
           send_wecom(content)
