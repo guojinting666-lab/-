@@ -2,12 +2,9 @@ name: Daily Light Brief
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
   schedule:
-    # Diagnostic test: run every 5 minutes. Disable after confirming schedule works.
-    - cron: "*/5 * * * *"
+    # 00:07 UTC = 08:07 Beijing time. Avoid GitHub Actions top-of-hour congestion.
+    - cron: "7 0 * * *"
 
 jobs:
   send-brief:
@@ -218,21 +215,12 @@ jobs:
               if not WECOM_WEBHOOK:
                   raise RuntimeError("缺少 GitHub Secret：WECOM_WEBHOOK")
               payload = {"msgtype": "markdown", "markdown": {"content": content}}
-              last_error = None
-              for attempt in range(1, 4):
-                  try:
-                      raw = post_json(WECOM_WEBHOOK, payload, timeout=60)
-                      print(raw)
-                      if json.loads(raw).get("errcode") == 0:
-                          return
-                      last_error = raw
-                  except Exception as e:
-                      last_error = str(e)
-                      print(f"wecom send attempt {attempt} failed:", last_error[:200])
-                      time.sleep(8 * attempt)
-              raise RuntimeError("企业微信发送失败：" + str(last_error))
+              raw = post_json(WECOM_WEBHOOK, payload, timeout=90)
+              print(raw)
+              if json.loads(raw).get("errcode") != 0:
+                  raise RuntimeError("企业微信发送失败：" + raw)
 
-          print("SCRIPT_VERSION: light-brief-v17-diagnostic-push-schedule")
+          print("SCRIPT_VERSION: light-brief-v18-no-duplicate")
           content = build_content()
           print(content)
           send_wecom(content)
